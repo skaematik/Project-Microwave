@@ -1,6 +1,3 @@
-
-
-
 ; STUB CODE 
 ; includes code for displaying the number pressed on the
 ; keypad onto the LCD screen
@@ -8,13 +5,13 @@
 ; taken & modified from lab 4, part D
 
 
-.def row = r16 ; current row number 
-.def col = r17 ; current column number 
-.def rmask = r18 ; mask for current row during scan 
-.def cmask = r19 ; mask for current column during scan 
+.def row = r16 ; time row number 
+.def col = r17 ; time column number 
+.def rmask = r18 ; mask for time row during scan 
+.def cmask = r19 ; mask for time column during scan 
 .def temp1 = r20 
 .def temp2 = r21 
-.def temp3 = r26
+.def temp3 = r22
 
 .equ PORTLDIR = 0xF0 ; PD7-4: output, PD3-0, input 
 .equ INITCOLMASK = 0xEF ; scan from the rightmost column, \
@@ -29,10 +26,9 @@
 ; Port F is output and connects to LCD; Port A controls the LCD. 
 ; Assume all other labels are pre-defined. 
 
-.def del_hi = r22
-.def del_lo = r23
-.def current = r24
-.def total = r25
+.def del_hi = r23
+.def del_lo = r24
+.def time = r25
 
 .equ LCD_RS = 7
 .equ LCD_E = 6
@@ -52,112 +48,28 @@
 
 .equ LCD_NEW_LINE = 192
 
-.macro lcd_write_com 
-	ldi temp2, @0
-	out PORTF, temp2 ; set the data port's value up 
-	;clr temp 
-	;out PORTA, temp ; RS = 0, RW = 0 for a command write 
-	delay 1000 ; delay to meet timing (Set up time) 
-	sbi PORTA, LCD_E ; turn on the enable pin 
-	delay 1000 ; delay to meet timing (Enable pulse width) 
-	cbi PORTA, LCD_E ; turn off the enable pin 
-	delay 1000 ; delay to meet timing (Enable cycle time) 
-.endmacro
+;####################
+; INITIALISATION
+;####################
 
+Reset: 
 
-.macro lcd_write_data
-	mov temp2, @0
-	out PORTF, temp2 ; set the data port's value up 
-	sbi PORTA, LCD_RS ; RS = 1, RW = 0 for a data write 
-	delay 1000 ; delay to meet timing (Set up time) 
-	sbi PORTA, LCD_E ; turn on the enable pin 
-	delay 1000 ; delay to meet timing (Enable pulse width)  
-	cbi PORTA, LCD_E ; turn off the enable pin 
-	delay 1000 ; delay to meet timing (Enable cycle time) 
-	cbi PORTA, LCD_RS
-	lcd_wait_busy
-.endmacro
-
-.macro lcd_write_digit
-	push temp2
-	mov temp2, @0
-	subi temp2, -48
-	lcd_write_data temp2
-	clr temp2
-	pop temp2
-.endmacro
-
-.macro lcd_wait_busy 
-	push temp1
-	clr temp1
-	out DDRF, temp1 ; Make PORTF be an input port for now 
-	out PORTF, temp1 
-	sbi PORTA, LCD_RW ; RS = 0, RW = 1 for a command port read 
-busy_loop: 
-	delay 1000 ; delay to meet set-up time) 
-	sbi PORTA, LCD_E ; turn on the enable pin 
-	delay 1000 ; delay to meet timing (Data delay time) 
-	in temp1, PINF ; read value from LCF 
-	cbi PORTA, LCD_E ; turn off the enable pin 
-	sbrc temp1, LCD_BF ; if the busy flag is set 
-	rjmp busy_loop ; repeat command read ;else
-	cbi PORTA, LCD_RW ; turn off read mode, 
-	ser temp1 ; 
-	out DDRF, temp1 ; make PORTD an output port again
-	pop temp1 
-.endmacro
-
-
-;.equ F_CPU = 16000000
-;.equ DELAY_1MS = F_CPU / 4 / 1000 - 4
-; 4 cycles per iteration - setup/call-return overhead
-
-.macro delay
-	push del_lo
-	push del_hi
-	ldi del_lo, low(@0)
-	ldi del_hi, high(@0)
-loop: 
-	subi del_lo, 1 
-	sbci del_hi, 0  
-	brne loop ; taken branch takes two cycles. 
-		; one loop time is 8 cycles = ~1.08us 
-	pop del_hi
-	pop del_lo
-.endmacro
-
-.macro display_numbers ;load in number to be split into digits and displayed
-	push temp1
-	push temp2
-	push temp3
-	
-	mov temp1, @0
-	clr temp2
-	clr temp3
-
-	rcall checkHundredsDigit
-
-	pop temp3
-	pop temp2
-	pop temp1
-.endmacro
-
-
-RESET: 
-	ldi temp1, low(RAMEND) ; initialize the stack 
+	; Initialize the stack 
+	ldi temp1, low(RAMEND) 
 	out SPL, temp1 
 	ldi temp1, high(RAMEND) 
 	out SPH, temp1 
 
-	; -- keypad
+	; Keypad
 	ldi temp1, PORTLDIR ; PA7:4/PA3:0, out/in 
 	sts DDRL, temp1 
 
-	ser temp1 ; PORTC is output 
+	; Set PORTC as output (LEDS)
+	ser temp1 
 	out DDRC, temp1 
 	out PORTC, temp1
 
-	; -- LCD
+	; LCD
 	ser temp1
 	out DDRF, temp1
 	out DDRA, temp1
@@ -165,8 +77,7 @@ RESET:
 	out PORTF, temp1
 	out PORTA, temp1
 
-
-	;lcd display initialisation
+	; Lcd display initialisation
 	delay 15000; delay (>15ms) 
 
 	; Function set command with N = 1 and F = 0 
@@ -197,33 +108,58 @@ RESET:
 	; Display On command with C = 1 and B = 0 
 	lcd_write_com LCD_DISP_ON
 
-	clr total
-	clr current
-	;initialise with 0 0 display
-	lcd_write_digit total
+
+	; Your own initialisation
+	clr time
+
+	; Initialise with current time as 00:00
+	ldi temp1, 0
+	lcd_write_digit temp1
+	lcd_write_digit temp1
+	ldi temp1, ':'
+	lcd_write_data temp1
+	ldi temp1, 0
+	lcd_write_digit temp1
+	lcd_write_digit temp1
+
+	; New line
 	lcd_write_com LCD_NEW_LINE
-	lcd_write_digit current
+
+	; Write E10 to bottom line of the LCD
+	ldi temp1, 'E'
+	lcd_write_data temp1
+	ldi temp1, 1
+	lcd_write_digit temp1
+	ldi temp1, 0
+	lcd_write_digit temp1
+
+;####################
+; READ KEYPAD
+;####################
 
 main: 
-	ldi cmask, INITCOLMASK ; initial column mask 
-	clr col ; initial column
+	ldi cmask, INITCOLMASK ; cmask = INITCOLMASK = 0xEF = 1110 1111
+	clr col ; column = 0
 
 colloop: 
-	cpi col, 4 
-	breq main ; If all keys are scanned, repeat. 
-	sts PORTL, cmask ; Otherwise, scan a column.
-	ldi temp1, 0xFF ; Slow down the scan operation. 
+	; Scan each column
+	cpi col, 4 ; if (col == 4)
+	breq main ; go to main -> If all keys are scanned, repeat. 
+	sts PORTL, cmask ; else, scan a column.
 
+	; Slow down the scan operation by waiting.
+	ldi temp1, 0xFF 
 wait: 
 	dec temp1 
 	brne wait
 
+	; Read input from PortL
 	lds temp1, PINL ; Read PORTL
 	andi temp1, ROWMASK ; Get the keypad output value 
 	cpi temp1, 0xF ; Check if any row is low 
 	breq nextcol ; If yes, find which row is low 
 	ldi rmask, INITROWMASK ; Initialize for row check 
-	clr row ;
+	clr row ; row = 0
 
 rowloop: 
 	cpi row, 4 
@@ -241,96 +177,86 @@ nextcol: ; if row scan is over
 	inc col ; increase column value 
 	jmp colloop ; go to the next column
 
+
+;##########################
+; CONVERT KEYPAD TO NUMBER
+;##########################
+
 convert: 
 	cpi col, 3 ; If the pressed key is in col.3 
-	breq letters ; we have a letter 
+	breq isLetter ; we have a letter 
 
 	; If the key is not in col.3 and 
-
 	cpi row, 3 ; If the key is in row3, 
-	breq symbols ; we have a symbol or 0 
+	breq isSymbol ; we have a symbol or 0 
 
 	mov temp1, row ; Otherwise we have a number in 1-9 
 
+isNumber:
 	; Dont display if larger than 100 
-	cpi current, 100
-	brsh convert_end_connector
+	cpi time, 100
+	brsh convert_end
 
 	lsl temp1 
 	add temp1, row 
 	add temp1, col ; temp1 = row*3 + col 
 	subi temp1, -1 ; Add the value of character ‘1’ 
-	ldi temp2, 10 ;multiply current number by ten then add the new digit
-	mul current, temp2
-	mov current, r0
-	add current, temp1
+	ldi temp2, 10 ;multiply time number by ten then add the new digit
+	mul time, temp2
+	mov time, r0
+	add time, temp1
 	clr temp2
 	clr temp1
 	clr r0
 	;subi temp1, -48
 	jmp convert_end
 
-letters: 
+isLetter: 
 	jmp convert_end 
 
-symbols: 
+isSymbol: 
 	cpi col, 0 ; Check if we have a star 
-	breq star 
+	breq isStar 
 	cpi col, 1 ; or if we have zero 
-	breq zero 
-	;ldi temp1, '#' ; if not we have hash 
-	;jmp convert_end 
+	breq isZero 
+	jmp isHash ; if not we have hash 
 	jmp main
 
-star: 
+isStar: 
 	ldi temp1, '*' ; Set to star 
-	; jmp RESET ;reset whole thingo
 	jmp convert_end 
 
-zero: 
+isHash:
+	ldi temp1, '#'
+	jmp convert_end 
+
+isZero: 
 	ldi temp1, '0' ; Set to zero 
+	jmp convert_end 
 	
 convert_end: 
-	lcd_write_com LCD_DISP_CLR ;clear the display
-	lcd_wait_busy ;take yo time buddy
-	;lcd_write_data total
-	display_numbers total ;display total number
-	lcd_write_com LCD_NEW_LINE ;next line
-	;lcd_write_data current ; Write value to PORTC 
+	lcd_write_com LCD_DISP_CLR ; clear the display
+	lcd_wait_busy 
 
-	mov temp1, current
-	clr temp2
-	clr temp3
 
-	rcall checkHundredsDigit
+	; Display the input time
+	display_numbers time 
 
-	; display_numbers current ;display current number
+	lcd_write_com LCD_NEW_LINE 
 
-wait2:  ;wait until button is released
-	lds temp2, PINL ; Read PORTL
-	;ldi temp1, 0xF
-	andi temp2, 0x0F ; rowmask of 0x0f
-	cpi temp2, 0x0F
+	; Write E10 to bottom line of the LCD
+	ldi temp1, 'E'
+	lcd_write_data temp1
+	ldi temp1, 1
+	lcd_write_digit temp1
+	ldi temp1, 0
+	lcd_write_digit temp1
 
-	breq end
-
-	push temp2
-	ldi temp1, 0xFF ; Slow down
-wait3: 
-	ldi temp2, 0xFF
-wait4:
-	dec temp2
-	brne wait4
-	dec temp1 
-	brne wait3
-	pop temp2
-
-	rjmp wait2
 
 end: ;restart yo ass
 	rjmp main
 
-;; temp1 -- current number to be displayed / parsed
+;; temp1 -- time number to be displayed / parsed
 ;; temp2 -- the number of <hundreds/tens/ones> found in temp1
 ; -- check if the number has a hundreds digit, if none left, 
 ; then push the number of hundreds onto stack
