@@ -1,0 +1,151 @@
+entryStuff = display turntable, open/closed, E10, time
+
+
+turntable = stopped
+magnetron = stopped
+display entryStuff
+
+OPEN INTERRUPT
+	If mode == running
+		mode = paused
+	elsif mode == finished
+		mode = entry
+	open = true
+	turn on LED
+
+CLOSE INTERRUPT
+	open = false
+	turn off top-most LED
+
+
+
+MAIN
+if open == true 
+	restart
+
+if mode == entry
+	if 0-9
+		insert digit to the time
+		display updated time
+	if # 
+		clear time
+		display cleared time
+	if A
+		mode = powerAdjustment
+		display "Set Power 1/2/3"
+	if *
+		if time entered
+			mode = running
+			display time
+		else
+			mode = running
+			set time = 1 min
+			display 1 min of time
+elsif mode == powerAdjustment
+	if 1
+		power = 100
+	if 2 
+		power = 50
+	if 3
+		power = 25
+	if A
+		mode = entry
+		display entryStuff
+elsif mode == running
+	if C
+		add 30s to time
+	if D
+		minus 30s to time
+	if *
+		add 1 min to time
+	if #
+		mode = paused
+elsif mode == paused
+	if * 
+		mode = running
+	if #
+		if open = true
+			pass
+		else
+			mode = running
+elsif mode == finished
+	if #
+		mode = entry
+
+
+
+
+update turntable
+if needToUpdateTurntable == 1
+	get current character index
+	if CCW
+		index++
+	else 
+		index--
+	display it
+	needToUpdateTurntable = 0
+
+update magnetron
+	if needToUpdateMagnetron == 1
+		if magnetron running
+			turn magnetron off
+		else
+			output pwm for 100 rev/min
+		needToUpdateMagnetron = 0
+
+Timer
+update {
+	if mode == running
+		update turntable
+		update magnetron
+
+
+		time is ticking
+		if time ran out
+			mode = finished
+			display done, remove food
+	else 
+		stop turntable
+		stop magnetron
+		time isnt ticking
+}
+
+counter {
+if stuff is not running
+	reset timers
+	reset magnetrontimer
+	output pwn to magnetron for 100rev/min
+	stuff is running
+
+if mode == running
+	count 250ms
+	250counter++
+	magnetrontimer++
+	if powerlevel == 1 (100)
+		pass
+	elsif powerlevel == 2 (50)
+		if magnetrontimer == 2 or 4
+			needToUpdateMagnetron == 1
+	elsif powerlevel == 3 (25)
+		if magnetrontimer == 1 or 4
+			needToUpdateMagnetron == 1
+
+	if magnetronTimer == 4
+		reset magnetronTimer to 0
+
+	if 250counter == 2
+		reset 250counter
+		500counter++
+
+	if 500counter == 2
+		reset 500counter
+		1000counter++
+		needToUpdate
+
+	if 1000counter == 5
+		reset 1000counter
+		needToUpdateTurnTable = 1
+		// 5 seconds has passed
+}
+
+
