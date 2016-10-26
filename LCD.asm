@@ -273,12 +273,12 @@ RESET:
 	setVar d, v
 
 	; Init with 0 0 display
-	; lcd_write_digit total
-	; lcd_write_com LCD_NEW_LINE
+	lcd_write_data_direct '0'
+	lcd_write_data_direct '0'
+	lcd_write_data_direct ':'
+	lcd_write_data_direct '0'
+	lcd_write_data_direct '0'
 	
-	getVar currentInput, v
-	lcd_write_digit v
-
 main: 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	ldi v, INITCOLMASK ; initial column mask 
@@ -443,7 +443,7 @@ isZero:
 	; mov current, r0
 	; clr temp2
 	; clr r0
-	ldi v, '0'
+	ldi v, 0
 	setVar currentInput, v
 	jmp convert_end
 
@@ -465,7 +465,7 @@ convert_end:
 		rjmp handleOpenDoor
 
 	handleOpenDoor:
-		rjmp end
+		jmp end
 
 ; Branch
 	; if mode == entry
@@ -526,16 +526,32 @@ convert_end:
 			ldi v, 0x01
 			out PORTC, v
 
-			getVar currentInput, v
-
 			cpi v, '#'
 			breq clearTime_train
 			cpi v, 'A'
 			breq setPowerAdjustmentMode_train
+			cpi v, '*'
+			breq beginRunning_train
 
-			cpi v, '0'
+			cpi v, 0
 			breq insertDigitIntoTime_train
-			cpi v, '1'
+			cpi v, 1
+			breq insertDigitIntoTime_train
+			cpi v, 2
+			breq insertDigitIntoTime_train
+			cpi v, 3
+			breq insertDigitIntoTime_train
+			cpi v, 4
+			breq insertDigitIntoTime_train
+			cpi v, 5
+			breq insertDigitIntoTime_train
+			cpi v, 6
+			breq insertDigitIntoTime_train
+			cpi v, 7
+			breq insertDigitIntoTime_train
+			cpi v, 8
+			breq insertDigitIntoTime_train
+			cpi v, 9
 			breq insertDigitIntoTime_train
 
 			jmp end
@@ -544,6 +560,8 @@ convert_end:
 				jmp clearTime
 			setPowerAdjustmentMode_train:
 				jmp setPowerAdjustmentMode
+			beginRunning_train:
+				jmp beginRunning
 			insertDigitIntoTime_train:
 				jmp insertDigitIntoTime
 
@@ -554,11 +572,7 @@ convert_end:
 				setVar c, v
 				setVar d, v
 
-				lcd_write_data_direct '0'
-				lcd_write_data_direct '0'
-				lcd_write_data_direct ':'
-				lcd_write_data_direct '0'
-				lcd_write_data_direct '0'
+				rcall printTimeToLCD
 
 				jmp end
 
@@ -566,56 +580,127 @@ convert_end:
 				ldi v, 2
 				setVar mode, v
 
+				lcd_write_data_direct 'S'
+				lcd_write_data_direct 'e'
+				lcd_write_data_direct 't'
+				lcd_write_data_direct ' '
+				lcd_write_data_direct 'P'
+				lcd_write_data_direct 'o'
+				lcd_write_data_direct 'w'
+				lcd_write_data_direct 'e'
+				lcd_write_data_direct 'r'
+				lcd_write_data_direct ' '
+				lcd_write_data_direct '1'
+				lcd_write_data_direct '/'
+				lcd_write_data_direct '2'
+				lcd_write_data_direct '/'
+				lcd_write_data_direct '3'
 
 				jmp end		
+
+			beginRunning:
+
+				; Check if time is empty or not 
+				; ldi temp1, 0xFF
+
+				; NEED TO FIX THIS
+				; getVar a, v
+				; and temp1, v
+
+				; getVar b, v
+				; and temp1, v
+
+				; getVar c, v
+				; and temp1, v
+				
+				; getVar d, v
+				; and temp1, v
+
+				; cpi temp1, 0
+				; breq setToOneMin
+
+				jmp beginRunning_goToRunningMode
+
+				; Set the time to one min if time is empty, begin running
+				setToOneMin:
+					ldi v, 1
+					setVar b, v
+
+				jmp beginRunning_goToRunningMode
+				
+				; Else don't change the time, begin running
+				beginRunning_goToRunningMode:
+					ldi v, 3
+					setVar mode, v
+
+					; Print
+					rcall printTimeToLCD
+
+				jmp end
 
 			insertDigitIntoTime:
-				getVar b, v
-				setVar a, v
 
-				getVar c, v
-				setVar b, v
-
-				getVar d, v
-				setVar c, v
-
-				getVar currentInput, v
-				setVar d, v	
-
+				; If a > 0, end.
 				getVar a, v
-				lcd_write_data_register v
-				; ldi v, 0
-				; lcd_write_digit v
-				; getVar b, v
-				; lcd_write_digit v
-				; getVar c, v
-				; lcd_write_digit v
-				; getVar d, v
-				; lcd_write_digit v
+				cpi v, 0
+				brne insertDigitIntoTime_printOnly_train
+				jmp insertDigitIntoTime_cont
+
+				insertDigitIntoTime_printOnly_train:
+					jmp insertDigitIntoTime_printOnly
+
+				; Shift digits, then insert the newest one.
+				insertDigitIntoTime_cont:
+					getVar b, v
+					setVar a, v
+
+					getVar c, v
+					setVar b, v
+
+					getVar d, v
+					setVar c, v
+
+					getVar currentInput, v
+					setVar d, v	
+
+				; Print the digits
+				insertDigitIntoTime_printOnly:
+					rcall printTimeToLCD
 
 				jmp end		
+
+; Power Selection Mode
+	; elsif mode == powerAdjustment
+	; 	if 1
+	; 		power = 100
+	; 	if 2 
+	; 		power = 50
+	; 	if 3
+	; 		power = 25
+	; 	if A
+	; 		mode = entry
+	; 		display entryStuff
 
 		handlePowerSelectionMode_keypad:
 			ldi v, 0x02
 			out PORTC, v
 
-			lcd_write_data_direct 'S'
-			lcd_write_data_direct 'e'
-			lcd_write_data_direct 't'
-			lcd_write_data_direct ' '
-			lcd_write_data_direct 'P'
-			lcd_write_data_direct 'o'
-			lcd_write_data_direct 'w'
-			lcd_write_data_direct 'e'
-			lcd_write_data_direct 'r'
-			lcd_write_data_direct ' '
-			lcd_write_data_direct '1'
-			lcd_write_data_direct '/'
-			lcd_write_data_direct '2'
-			lcd_write_data_direct '/'
-			lcd_write_data_direct '3'
+			
+
+
 
 			jmp end
+
+; Running Mode
+	; elsif mode == running
+	; 	if C
+	; 		add 30s to time
+	; 	if D
+	; 		minus 30s to time
+	; 	if *
+	; 		add 1 min to time
+	; 	if #
+	; 		mode = paused
 
 		handleRunningMode_keypad:
 			ldi v, 0x03
@@ -623,11 +708,26 @@ convert_end:
 
 			jmp end
 
+; Paused mode
+	; elsif mode == paused
+	; 	if * 
+	; 		mode = running
+	; 	if #
+	; 		if open = true
+	; 			pass
+	; 		else
+	; 			mode = running
+
 		handlePausedMode_keypad:
 			ldi v, 0x04
 			out PORTC, v
 
 			jmp end
+
+; Finished mode
+	; elsif mode == finished
+	; 	if #
+	; 		mode = entry
 
 		handleFinishedMode_keypad:
 			ldi v, 0x05
@@ -636,43 +736,23 @@ convert_end:
 			jmp end
 
 
-; OLD STUFF
-
-	; Write data
-	; INSERT DIGIT 
-	; WRITE DATA 
-
-	; ;lcd_write_data total
-	; display_numbers total ;display total number
-	; lcd_write_com LCD_NEW_LINE ;next line
-	; ;lcd_write_data current ; Write value to PORTC 
-	; display_numbers current
 
 
 ;;;;;;;;;;;;;;;;;;;;;;
-; wait2:  ;wait until button is released
-; 	lds temp2, PINL ; Read PORTL
-; 	;ldi temp1, 0xF
-; 	andi temp2, 0x0F ; rowmask of 0x0f
-; 	cpi temp2, 0x0F
+end:
 
-; 	breq end
+wait2:  ;wait until button is released
+	lds v, PINL ; Read PORTL
+	andi v, 0x0F ; rowmask of 0x0f
+	cpi v, 0x0F
 
-; 	push temp2
-; 	ldi temp1, 0xFF ; Slow down
-; wait3: 
-; 	ldi temp2, 0xFF
-; wait4:
-; 	dec temp2
-; 	brne wait4
-; 	dec temp1 
-; 	brne wait3
-; 	pop temp2
+	breq final
 
-; 	rjmp wait2
+	rjmp wait2
+
 ;;;;;;;;;;;;;;;;;;;;;;
-
-end: ;restart yo ass
+final:
+ ;restart yo ass
 	jmp main
 
 
@@ -745,3 +825,21 @@ cleanup:
 	clr temp3
 	ret
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+printTimeToLCD:
+	getVar a, v
+	lcd_write_digit v
+
+	getVar b, v
+	lcd_write_digit v
+
+	lcd_write_data_direct ':'
+
+	getVar c, v
+	lcd_write_digit v
+
+	getVar d, v
+	lcd_write_digit v
+
+	ret
