@@ -1,3 +1,4 @@
+
 ; STUB CODE 
 ; includes code for displaying the number pressed on the
 ; keypad onto the LCD screen
@@ -13,6 +14,8 @@
 .def temp1 = r17
 .def temp2 = r18
 .def temp3 = r19
+.def mins = r20
+.def secs = r21
 
 .dseg
 	row: .byte 1
@@ -27,6 +30,9 @@
 
 	; The current input from the keypad
 	currentInput: .byte 1
+
+	; Power level
+	power: .byte 1
 
 	; Time - split into minutes and seconds
 	a: .byte 1
@@ -68,8 +74,6 @@
 
 .def del_hi = r22
 .def del_lo = r23
-; .def current = r24
-.def total = r25
 
 .equ LCD_RS = 7
 .equ LCD_E = 6
@@ -192,6 +196,50 @@ loop:
 .endmacro
 
 
+; convertDigitsToTime - a, b, c, d to mins and secs
+.macro convertDigitsToTime
+	; takes first two digits for minutes
+	getVar a, temp1
+	ldi temp2, 10
+	multiply temp1, temp2
+	mov mins, temp1
+	getVar b, temp1
+	add mins, temp1
+
+	; takes last two digits for seconds
+	getVar c, temp1
+	ldi temp2, 10
+	multiply temp1, temp2
+	mov secs, temp1
+	getVar d, temp1
+	add secs, temp1
+.endmacro
+
+
+; multiply <NUMBER> <MULTIPLIER>
+.macro multiply
+	mul @0, @1
+	mov @0, r0
+.endmacro
+
+; divide <NUMBER> <DIVISOR>
+.macro divide
+		mov temp1, @0
+		mov temp2, @1
+		clr temp3 ; divided amount
+	compare_divide:
+		cp temp1, temp2
+		brsh loop_divide
+		rjmp end_divide
+	loop_divide:
+		sub temp1, temp2
+		inc temp3
+		rjmp compare_divide
+	end_divide:
+		mov @0, temp3
+.endmacro
+
+
 RESET: 
 	; Stack init
 	ldi temp1, low(RAMEND)
@@ -250,7 +298,7 @@ RESET:
 
 
 	; Your own init
-	clr total
+	; clr total
 	; clr current
 
 	; Door is not initially open
@@ -523,8 +571,10 @@ convert_end:
 	; 		display 1 min of time
 		
 		handleEntryMode_keypad:
-			ldi v, 0x01
-			out PORTC, v
+			; ldi v, 0x01
+			; out PORTC, v
+
+			getVar currentInput, v
 
 			cpi v, '#'
 			breq clearTime_train
@@ -572,7 +622,10 @@ convert_end:
 				setVar c, v
 				setVar d, v
 
-				rcall printTimeToLCD
+				clr mins
+				clr secs
+
+				rcall printDigitsToLCD
 
 				jmp end
 
@@ -580,44 +633,22 @@ convert_end:
 				ldi v, 2
 				setVar mode, v
 
-				lcd_write_data_direct 'S'
-				lcd_write_data_direct 'e'
-				lcd_write_data_direct 't'
-				lcd_write_data_direct ' '
-				lcd_write_data_direct 'P'
-				lcd_write_data_direct 'o'
-				lcd_write_data_direct 'w'
-				lcd_write_data_direct 'e'
-				lcd_write_data_direct 'r'
-				lcd_write_data_direct ' '
-				lcd_write_data_direct '1'
-				lcd_write_data_direct '/'
-				lcd_write_data_direct '2'
-				lcd_write_data_direct '/'
-				lcd_write_data_direct '3'
+				rcall writePowerLabels
 
 				jmp end		
 
 			beginRunning:
 
 				; Check if time is empty or not 
-				; ldi temp1, 0xFF
-
-				; NEED TO FIX THIS
-				; getVar a, v
-				; and temp1, v
-
-				; getVar b, v
-				; and temp1, v
-
-				; getVar c, v
-				; and temp1, v
-				
-				; getVar d, v
-				; and temp1, v
-
-				; cpi temp1, 0
-				; breq setToOneMin
+				getVar a, temp1
+				getVar b, temp2
+				add temp1, temp2
+				getVar c, temp2
+				add temp1, temp2
+				getVar d, temp2
+				add temp1, temp2
+				cpi temp1, 0
+				breq setToOneMin
 
 				jmp beginRunning_goToRunningMode
 
@@ -634,6 +665,7 @@ convert_end:
 					setVar mode, v
 
 					; Print
+					convertDigitsToTime
 					rcall printTimeToLCD
 
 				jmp end
@@ -665,7 +697,7 @@ convert_end:
 
 				; Print the digits
 				insertDigitIntoTime_printOnly:
-					rcall printTimeToLCD
+					rcall printDigitsToLCD
 
 				jmp end		
 
@@ -682,14 +714,62 @@ convert_end:
 	; 		display entryStuff
 
 		handlePowerSelectionMode_keypad:
-			ldi v, 0x02
-			out PORTC, v
+			; ldi v, 0x02
+			; out PORTC, v
 
-			
+			getVar currentInput, v
 
+			cpi v, 1
+			breq setPowerOf100
+			cpi v, 2
+			breq setPowerOf50
+			cpi v, 3
+			breq setPowerOf25
 
+			cpi v, '#'
+			breq goBackToEntry
 
 			jmp end
+
+			setPowerOf100:
+				ldi v, 100
+				setVar power, v
+
+				ldi v, 0b11111111
+ 				out PORTC, v
+
+				rcall writePowerLabels
+
+				jmp end
+
+			setPowerOf50:
+				ldi v, 50
+				setVar power, v
+
+				ldi v, 0b00001111
+ 				out PORTC, v
+
+				rcall writePowerLabels
+
+				jmp end
+
+			setPowerOf25:
+				ldi v, 25
+				setVar power, v
+
+				ldi v, 0b00000011
+ 				out PORTC, v
+
+				rcall writePowerLabels
+
+				jmp end
+
+			goBackToEntry:
+				ldi v, 1
+				setVar mode, v
+				rcall printDigitsToLCD
+
+				jmp end
 
 ; Running Mode
 	; elsif mode == running
@@ -706,7 +786,71 @@ convert_end:
 			ldi v, 0x03
 			out PORTC, v
 
+			getVar currentInput, v
+
+			cpi v, 'C'
+			breq add30Secs
+			cpi v, 'D'
+			breq minus30Secs
+			cpi v, '*'
+			breq add1Min
+			cpi v, '#'
+			breq goToPaused
+
 			jmp end
+
+				; if secs < 30
+				; 	add 30 to secs
+				; elsif secs >= 30
+				; 	remove 30 from secs
+				; 	add 1 to min if min != 99
+				add30Secs:
+					cpi secs, 30
+					brsh add30Secs_specialCase
+					subi secs, -30
+					jmp add30Secs_end
+
+					add30Secs_specialCase:
+						cpi mins, 99
+						breq add30Secs_end
+						subi secs, 30
+						subi mins, -1
+						jmp add30Secs_end
+
+					add30Secs_end:
+						rcall printTimeToLCD
+						jmp end
+
+				; if secs >= 30
+				; 	remove 30 from secs
+				; elsif secs < 30
+				; 	add 30 to secs
+				; 	remove 1 from min if min != 0
+				minus30Secs:
+					cpi secs, 30
+					brlt minus30Secs_specialCase
+					subi secs, 30
+					jmp minus30Secs_end
+
+					minus30Secs_specialCase:
+						cpi mins, 0
+						breq minus30Secs_end
+						subi secs, -30
+						subi mins, 1
+						jmp minus30Secs_end
+
+					minus30Secs_end:
+						rcall printTimeToLCD
+						jmp end
+
+				add1Min:
+
+				jmp end
+
+				goToPaused:
+
+				jmp end
+
 
 ; Paused mode
 	; elsif mode == paused
@@ -827,7 +971,7 @@ cleanup:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-printTimeToLCD:
+printDigitsToLCD:
 	getVar a, v
 	lcd_write_digit v
 
@@ -841,5 +985,35 @@ printTimeToLCD:
 
 	getVar d, v
 	lcd_write_digit v
+
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+printTimeToLCD:
+	display_numbers mins
+	; lcd_write_com LCD_NEW_LINE
+	display_numbers secs
+
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+writePowerLabels:
+	lcd_write_data_direct 'S'
+	lcd_write_data_direct 'e'
+	lcd_write_data_direct 't'
+	lcd_write_data_direct ' '
+	lcd_write_data_direct 'P'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'w'
+	lcd_write_data_direct 'e'
+	lcd_write_data_direct 'r'
+	lcd_write_data_direct ' '
+	lcd_write_data_direct '1'
+	lcd_write_data_direct '/'
+	lcd_write_data_direct '2'
+	lcd_write_data_direct '/'
+	lcd_write_data_direct '3'
 
 	ret
