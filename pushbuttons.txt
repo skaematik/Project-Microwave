@@ -1,0 +1,62 @@
+.include "m2560def.inc"
+
+.cseg
+.org 0x0000
+	jmp start
+.org INT0addr
+	jmp EXT_INT0
+.org INT1addr
+	jmp EXT_INT1
+	jmp default
+
+default:
+	reti
+
+start:
+
+	; -- vars
+	clr output ;init output pattern
+
+	; -- interrupts
+	ldi temp1, (2 << ISC00) | (2 << ISC10) ;set INT0 and INT1 (i.e. from ISCn0) as falling-edge triggered
+	sts EICRA, temp1 ;use register A (i.e EICRA) for INT0
+
+	in temp1, EIMSK ;enable INT0 by setting corresp. bit in EIMSK
+	ori temp1, (1 << INT0) | (1 << INT1) ;ori=logical OR
+	out EIMSK, temp1
+
+
+
+EXT_INT0:
+	; -- save
+	in temp1, SREG ;save SREG
+	push temp1
+
+	; -- instructions
+	ldi temp2, 1
+	setVar doorisopen, temp2
+	ldi temp2, 0b10000000
+	out PORTC, temp2
+
+	; -- restore
+	pop temp1 ;restore SREG
+	out SREG, temp1
+	reti ;return from interrupt
+
+EXT_INT1:
+
+	; -- save
+	in temp1, SREG 
+	push temp1
+
+	; -- instructions
+	clr temp2
+	setVar doorisopen, temp2
+	ldi temp2, 0b00000001
+	out PORTC, temp2
+
+	; -- restore
+	pop temp1
+	out SREG, temp1
+	reti
+
