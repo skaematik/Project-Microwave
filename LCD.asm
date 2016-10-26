@@ -1,4 +1,5 @@
 
+
 ; STUB CODE 
 ; includes code for displaying the number pressed on the
 ; keypad onto the LCD screen
@@ -39,25 +40,41 @@
 	b: .byte 1
 	c: .byte 1
 	d: .byte 1
+
+	; Functions refer to magnetron, turntable and timers
+	functionsRunning: .byte 1
+
+
+	; Timers
+	counter: .byte 1
+	counter250: .byte 1
+	counter500: .byte 1
+	counter1000: .byte 1
+	counter5000: .byte 1
+
+	magnetronCounter: .byte 1
+	magnetronRunning: .byte 1
+
+	; turntable
+	index: .byte 1
+
 	
 .cseg
+.org 0x0000
+	jmp RESET
+.org INT0addr
+	jmp CLOSE_DOOR
+.org INT1addr
+	jmp OPEN_DOOR
+.org OVF0addr 
+	jmp TIMER
+	jmp default
+
+default:
+	reti
 
 
-; getVar <VARIABLE LABEL> <REGISTER>
-.macro getVar
-	ldi XH, high(@0)
-	ldi XL, low(@0)
 
-	ld @1, X
-.endmacro
-
-; setVar <VARIABLE LABEL> <REGISTER>
-.macro setVar
-	ldi XH, high(@0)
-	ldi XL, low(@0)
-
-	st X, @1
-.endmacro
 
 
 .equ PORTLDIR = 0xF0 ; PD7-4: output, PD3-0, input 
@@ -74,6 +91,7 @@
 
 .def del_hi = r22
 .def del_lo = r23
+.def t = r24
 
 .equ LCD_RS = 7
 .equ LCD_E = 6
@@ -96,8 +114,8 @@
 .macro lcd_write_com 
 	ldi temp2, @0
 	out PORTF, temp2 ; set the data port's value up 
-	;clr temp 
-	;out PORTA, temp ; RS = 0, RW = 0 for a command write 
+	;clr temp1 
+	;out PORTA, temp1 ; RS = 0, RW = 0 for a command write 
 	delay 1000 ; delay to meet timing (Set up time) 
 	sbi PORTA, LCD_E ; turn on the enable pin 
 	delay 1000 ; delay to meet timing (Enable pulse width) 
@@ -179,21 +197,7 @@ loop:
 	pop del_lo
 .endmacro
 
-.macro display_numbers ;load in number to be split into digits and displayed
-	push temp1
-	push temp2
-	push temp3
-	
-	mov temp1, @0
-	clr temp2
-	clr temp3
 
-	rcall checkHundredsDigit
-
-	pop temp3
-	pop temp2
-	pop temp1
-.endmacro
 
 
 ; convertDigitsToTime - a, b, c, d to mins and secs
@@ -239,6 +243,22 @@ loop:
 		mov @0, temp3
 .endmacro
 
+; getVar <VARIABLE LABEL> <REGISTER>
+.macro getVar
+	ldi XH, high(@0)
+	ldi XL, low(@0)
+
+	ld @1, X
+.endmacro
+
+; setVar <VARIABLE LABEL> <REGISTER>
+.macro setVar
+	ldi XH, high(@0)
+	ldi XL, low(@0)
+
+	st X, @1
+.endmacro
+
 
 RESET: 
 	; Stack init
@@ -254,8 +274,6 @@ RESET:
 	; LED init
 	ser temp1 ; PORTC is set as output 
 	out DDRC, temp1 
-	ldi temp1, 0xFF
-	out PORTC, temp1
 
 	; LCD init
 	ser temp1
@@ -264,6 +282,27 @@ RESET:
 	clr temp1
 	out PORTF, temp1
 	out PORTA, temp1
+
+	; Timer init
+	; -- Timer Counter Control Register for timer0
+	ldi temp1, 0b00000000
+	out TCCR0A, temp1
+	ldi temp1, 0b00000011
+	out TCCR0B, temp1 ; prescaling value = 8
+
+	; -- enable Timer/counter interrupt (enable overflow interrupt)
+	ldi temp1, 1 << TOIE0 
+	sts TIMSK0, temp1 ;T/C0 interrupt enable
+
+	sei ;set global interrupt flag (I) in sreg
+
+	; Interrupts for push buttons (INT0 and INT1)
+	ldi temp1, (2 << ISC00) | (2 << ISC10) ;set INT0 and INT1 (i.e. from ISCn0) as falling-edge triggered
+	sts EICRA, temp1 ;use register A (i.e EICRA) for INT0
+
+	in temp1, EIMSK ;enable INT0 by setting corresp. bit in EIMSK
+	ori temp1, (1 << INT0) | (1 << INT1) ;ori=logical OR
+	out EIMSK, temp1
 
 	; Lcd display initialisation
 	delay 15000; delay (>15ms) 
@@ -298,8 +337,6 @@ RESET:
 
 
 	; Your own init
-	; clr total
-	; clr current
 
 	; Door is not initially open
 	ldi v, 0
@@ -313,6 +350,10 @@ RESET:
 	ldi v, -1 ; null
 	setVar currentInput, v
 
+	; Set functions to not running
+	ldi v, 0
+	setVar functionsRunning, v
+
 	; The current time is initialised to 00:00
 	ldi v, 0
 	setVar a, v
@@ -320,15 +361,29 @@ RESET:
 	setVar c, v
 	setVar d, v
 
+	; Reset timers
+	ldi v, 0
+	setVar counter, v
+	setVar counter250, v
+	setVar counter500, v
+	setVar counter1000, v
+	setVar counter5000, v
+
+	; turntable
+	ldi v, 0
+	setVar index, v
+
+	; Set power level to 100
+	ldi v, 100
+	setVar power, v
+	ldi temp1, 0xFF
+	out PORTC, temp1
+
 	; Init with 0 0 display
-	lcd_write_data_direct '0'
-	lcd_write_data_direct '0'
-	lcd_write_data_direct ':'
-	lcd_write_data_direct '0'
-	lcd_write_data_direct '0'
+	rcall printDigitsToLCD
 	
-main: 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+main: 
 	ldi v, INITCOLMASK ; initial column mask 
 	setVar cmask, v
 	clr v ; initial column
@@ -513,7 +568,9 @@ convert_end:
 		rjmp handleOpenDoor
 
 	handleOpenDoor:
-		jmp end
+		jmp handleOpenDoor_train
+
+		
 
 ; Branch
 	; if mode == entry
@@ -571,8 +628,6 @@ convert_end:
 	; 		display 1 min of time
 		
 		handleEntryMode_keypad:
-			; ldi v, 0x01
-			; out PORTC, v
 
 			getVar currentInput, v
 
@@ -604,7 +659,7 @@ convert_end:
 			cpi v, 9
 			breq insertDigitIntoTime_train
 
-			jmp end
+			jmp handleEntryMode_keypad_end
 
 			clearTime_train:
 				jmp clearTime
@@ -616,14 +671,7 @@ convert_end:
 				jmp insertDigitIntoTime
 
 			clearTime:
-				ldi v, 0
-				setVar a, v
-				setVar b, v
-				setVar c, v
-				setVar d, v
-
-				clr mins
-				clr secs
+				rcall clearTimeAndDigits
 
 				rcall printDigitsToLCD
 
@@ -666,7 +714,7 @@ convert_end:
 
 					; Print
 					convertDigitsToTime
-					rcall printTimeToLCD
+					jmp printTimeToLCD_train
 
 				jmp end
 
@@ -699,7 +747,12 @@ convert_end:
 				insertDigitIntoTime_printOnly:
 					rcall printDigitsToLCD
 
-				jmp end		
+				jmp end	
+
+			handleEntryMode_keypad_end:
+				rcall printDigitsToLCD
+				jmp end	
+
 
 ; Power Selection Mode
 	; elsif mode == powerAdjustment
@@ -729,7 +782,7 @@ convert_end:
 			cpi v, '#'
 			breq goBackToEntry
 
-			jmp end
+			jmp handlePowerSelectionMode_keypad_else
 
 			setPowerOf100:
 				ldi v, 100
@@ -771,6 +824,12 @@ convert_end:
 
 				jmp end
 
+
+			handlePowerSelectionMode_keypad_else:
+				rcall writePowerLabels
+
+				jmp end
+
 ; Running Mode
 	; elsif mode == running
 	; 	if C
@@ -797,7 +856,7 @@ convert_end:
 			cpi v, '#'
 			breq goToPaused
 
-			jmp end
+			jmp handleRunningMode_keypad_else
 
 				; if secs < 30
 				; 	add 30 to secs
@@ -818,7 +877,7 @@ convert_end:
 						jmp add30Secs_end
 
 					add30Secs_end:
-						rcall printTimeToLCD
+						jmp printTimeToLCD_train
 						jmp end
 
 				; if secs >= 30
@@ -840,7 +899,7 @@ convert_end:
 						jmp minus30Secs_end
 
 					minus30Secs_end:
-						rcall printTimeToLCD
+						jmp printTimeToLCD_train
 						jmp end
 
 				add1Min:
@@ -850,10 +909,19 @@ convert_end:
 					jmp add1Min_end
 
 					add1Min_end:
-						rcall printTimeToLCD
+						jmp printTimeToLCD_train
 						jmp end
 
 				goToPaused:
+					ldi v, 4
+					setVar mode, v
+
+					jmp printTimeToLCD_train
+
+					jmp end
+
+			handleRunningMode_keypad_else:
+				jmp printTimeToLCD_train
 
 				jmp end
 
@@ -863,6 +931,8 @@ convert_end:
 	; 	if * 
 	; 		mode = running
 	; 	if #
+	;       mode = entry
+
 	; 		if open = true
 	; 			pass
 	; 		else
@@ -872,7 +942,37 @@ convert_end:
 			ldi v, 0x04
 			out PORTC, v
 
-			jmp end
+			getVar currentInput, v
+
+			cpi v, '*'
+			breq startRunningAgain
+			cpi v, '#'
+			breq goToEntryModeAgain
+
+			jmp handlePausedMode_keypad_else
+
+
+			startRunningAgain:
+				ldi v, 3
+				setVar mode, v
+
+				jmp printTimeToLCD_train
+				jmp end
+
+			goToEntryModeAgain:
+				ldi v, 1
+				setVar mode, v
+
+				rcall clearTimeAndDigits
+				rcall printDigitsToLCD
+
+				jmp end
+
+			handlePausedMode_keypad_else:
+				jmp printTimeToLCD_train
+
+				jmp end
+
 
 ; Finished mode
 	; elsif mode == finished
@@ -883,9 +983,23 @@ convert_end:
 			ldi v, 0x05
 			out PORTC, v
 
-			jmp end
+			getVar currentInput, v
+			cpi v, '#'
+			breq fromFinishedToEntry
 
+			jmp handleFinishedMode_keypad_else
 
+			fromFinishedToEntry:
+				ldi v, 1
+				setVar mode, v
+
+				rcall clearTimeAndDigits
+				rcall printDigitsToLCD
+				jmp end
+
+			handleFinishedMode_keypad_else:
+				jmp writeFinishedText_train
+				
 
 
 ;;;;;;;;;;;;;;;;;;;;;;
@@ -906,74 +1020,10 @@ final:
 	jmp main
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; temp1 -- current number to be displayed / parsed
-;; temp2 -- the number of <hundreds/tens/ones> found in temp1
-; -- check if the number has a hundreds digit, if none left, 
-; then push the number of hundreds onto stack
-checkHundredsDigit: 
-	cpi temp1, 100
-	brsh incHundreds ; branch if temp1 >= 100
-	push temp2 
-	clr temp2
-; -- check if the number has a tens digit, if none left,
-; then push number of tens onto stack	
-checkTensDigit: 
-	cpi temp1, 10 
-	brsh incTens ; branch if temp1 >= 10
-	push temp2
-	clr temp2
-; -- push the number of ones digits onto stack
-addones: 
-	push temp1
-	jmp popDigits
 
-incHundreds: ; increment number of hundreds
-	subi temp1, 100
-	inc temp2
-	rjmp checkHundredsDigit
-incTens: ; increment number of tens
-	subi temp1, 10
-	inc temp2
-	rjmp checkTensDigit
 
-; pop stored digits off stack
-popDigits: 
 
-	clr temp1
-	clr temp2
-	clr temp3
-
-	pop temp2 ; ones
-	pop temp1 ; tens
-	pop temp3 ; hundreds
-
-; check if we have a nonzero hundreds digit, if so then display the hundreds digit
-displayHundred:
-	; pop temp1 ; ones
-	cpi temp3, 0 
-	brne displayHundred_continue
-	rjmp displayTen
-displayHundred_continue:
-	lcd_write_digit temp3
-; check if we have a nonzero tens AND hundreds digit, if so then display the tens digit
-displayTen:
-	add temp3, temp1
-	cpi temp3, 0
-	brne displayTen_continue
-	rjmp displayOne
-displayTen_continue:
-	lcd_write_digit temp1
-; display ones digit
-displayOne: 
-	; out PORTC, temp2
-	lcd_write_digit temp2
-cleanup:
-	clr temp1
-	clr temp2
-	clr temp3
-	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -992,18 +1042,366 @@ printDigitsToLCD:
 	getVar d, v
 	lcd_write_digit v
 
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	jmp turntable_train
+
 	ret
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-printTimeToLCD:
-	display_numbers mins
-	; lcd_write_com LCD_NEW_LINE
-	display_numbers secs
+;;;;;;;;;;;;;;;;;;;;;;;
+
+clearTimeAndDigits:
+	ldi v, 0
+	setVar a, v
+	setVar b, v
+	setVar c, v
+	setVar d, v
+
+	clr mins
+	clr secs
 
 	ret
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+;;;;;;;;;;;;;;;;;;;;;
+turntable_train:
+	rcall turntable
+	ret
+;;;;;;;;;;;;;;;;;;;;;
+
+; turntable - displays current index character on screen
+turntable:
+	getVar index, temp1
+	cpi temp1, 0
+	breq index0
+	cpi temp1, 1
+	breq index1
+	cpi temp1, 2
+	breq index2
+	cpi temp1, 3
+	breq index3
+	jmp turntable_display
+
+	index0:
+		ldi temp1, '-'
+		jmp turntable_display
+	index1:
+		ldi temp1, '`'
+		jmp turntable_display
+	index2:
+		ldi temp1,  '|'
+		jmp turntable_display
+	index3:
+		ldi temp1, '/'
+		jmp turntable_display
+
+	turntable_display:
+		lcd_write_data_register temp1
+		clr temp1
+
+	ret
+;;;;;;;;;;;;;;;;;;;;
+
+
+OPEN_DOOR:
+	; -- save
+	in temp1, SREG ;save SREG
+	push temp1
+
+	; -- instructions
+	lcd_write_com LCD_DISP_CLR ;clear the display
+	lcd_wait_busy ;take yo time buddy
+
+	jmp handleOpenDoor_interrupttrain
+OPEN_DOOR_cont:
+	ldi temp2, 1
+	setVar doorIsOpen, temp2
+	ldi temp2, 0b10000000
+	out PORTC, temp2
+
+	; -- restore
+	pop temp1 ;restore SREG
+	out SREG, temp1
+	reti ;return from interrupt
+
+CLOSE_DOOR:
+
+	; -- save
+	in temp1, SREG 
+	push temp1
+
+	; -- instructions
+
+	getVar doorIsOpen, v
+	cpi v, 0
+	brne CLOSE_DOOR_cont
+	jmp CLOSE_DOOR_end
+
+CLOSE_DOOR_cont:
+	lcd_write_com LCD_DISP_CLR ;clear the display
+	lcd_wait_busy ;take yo time buddy
+	jmp writeDoorIsClosed_train
+
+CLOSE_DOOR_cont_from_writeDoorIsClosed:
+	ldi temp2, 0
+	setVar doorIsOpen, temp2
+	ldi temp2, 0b00000101
+	out PORTC, temp2
+
+	; -- restore
+CLOSE_DOOR_end:
+	pop temp1
+	out SREG, temp1
+	reti
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; if mode == running
+; 	if stuff is not running
+; 		reset timers
+; 		reset magnetrontimer
+; 		output pwn to magnetron for 100rev/min
+; 		stuff is running
+; 	else
+; 		count 250ms
+; 		counter250++
+; 		magnetrontimer++
+; 		if powerlevel == 1 (100)
+; 			pass
+; 		elsif powerlevel == 2 (50)
+; 			if magnetrontimer == 2 or 4
+; 				updatemagnetron
+; 		elsif powerlevel == 3 (25)
+; 			if magnetrontimer == 1 or 4
+; 				updatemagnetron
+
+; 		if magnetronTimer == 4
+; 			reset magnetronTimer to 0
+
+; 		if counter250 == 2
+; 			reset counter250
+; 			counter500++
+
+; 		if counter500 == 2
+; 			IF TIME == 0
+; 			 	go to finished mode
+; 				display done, remove food - rcall writeFinishedText
+; 			reset counter500
+; 			counter1000++
+; 			UPDATETIME ON LCD
+
+; 		if counter1000 == 5
+; 			reset counter1000
+; 			get current character index
+; 			if CCW
+; 				index++
+; 			else 
+; 				index--
+; 			display it
+; 			// 5 seconds has passed
+; else
+;   nothing
+;
+TIMER: 
+	; -- save
+	push temp1
+	push temp2
+	push temp3
+	in temp1, SREG  
+	push temp1 
+	push XH
+	push XL
+	push v
+
+; if mode == running
+; 	..
+; else
+; 	turn off magnetron, turntable, timers
+	
+	; jmp TIMER_end
+	getVar mode, v
+	cpi v, 3
+	breq handleRunning_timer
+	jmp TIMER_end
+
+	handleRunning_timer:
+		getVar functionsRunning, v
+		cpi v, 0
+		breq startRunning_timer
+		cpi v, 1
+		breq continueRunning_timer
+		jmp TIMER_end
+
+		startRunning_timer:
+			; Resets timers
+			ldi v, 0
+			setVar counter, v
+			setVar counter250, v
+			setVar counter500, v
+			setVar counter1000, v
+			setVar counter5000, v
+			setVar magnetronCounter, v
+
+			ldi v, 1
+			setVar functionsRunning, v
+			setVar magnetronRunning, v
+
+			; OUTPUT PWM SIGNAL HERE
+
+			jmp TIMER_end
+
+
+		continueRunning_timer:
+			getVar counter, v
+
+			cpi v, 244 ; instead of 244.14
+			breq handle250Counter
+
+			inc v
+			setVar counter, v
+
+			jmp TIMER_end
+
+			handle250Counter:
+				clr v
+				setVar counter, v
+
+				getVar counter250, v
+				inc v
+				setVar counter250, v
+				out PORTC, v
+
+				cpi v, 2
+				breq handle500Counter
+
+				jmp TIMER_end
+
+				handle500Counter:
+					clr v
+					setVar counter250, v
+
+					getVar counter500, v
+					inc v
+					setVar counter500, v
+
+					cpi v, 2
+					breq handle1000Counter
+
+					jmp TIMER_end
+
+					handle1000Counter:
+						clr v
+						setVar counter500, v
+
+						getVar counter1000, v
+						inc v
+						setVar counter1000, v
+
+						rcall updateTime
+
+						cpi v, 5
+						breq handle5000Counter
+
+						jmp TIMER_end
+
+						handle5000Counter:
+							clr v
+							setVar counter1000, v
+
+							rcall updateIndex
+
+							jmp TIMER_end
+
+
+	
+TIMER_end:
+
+	pop v
+	pop XL
+	pop XH
+	pop temp1
+	out SREG, temp1
+	pop temp3
+	pop temp2
+	pop temp1
+
+	reti
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+updateIndex:
+	getVar index, v
+	inc v
+	setVar index, v
+	cpi v, 4
+	breq setIndexBackToZero
+	jmp updateIndex_cont
+
+	setIndexBackToZero:
+		clr v
+		setVar index, v
+
+	updateIndex_cont:
+		; out PORTC, v
+	ret
+
+updateTime:
+	cpi secs, 0
+	breq minus1Sec_SpecialCase
+	dec secs
+	jmp updateTime_cont
+
+	minus1Sec_SpecialCase:
+		cpi mins, 0
+		breq goToFinished
+		dec mins
+		ldi secs, 59
+
+	updateTime_cont:
+		rcall printTimeToLCD
+		ret
+
+	goToFinished:
+		; Set mode
+		ldi v, 5
+		setVar mode, v
+
+		; Resets timers
+		ldi v, 0
+		setVar counter, v
+		setVar counter250, v
+		setVar counter500, v
+		setVar counter1000, v
+		setVar counter5000, v
+		setVar magnetronCounter, v
+
+		; Set to not running
+		ldi v, 0
+		setVar functionsRunning, v
+		setVar magnetronRunning, v
+
+
+		; Stop PWN signal
+		; OUTPUT PWM SIGNAL HERE
+
+		jmp writeFinishedText_timertrain
+
+	ret
+
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;
 
 writePowerLabels:
 	lcd_write_data_direct 'S'
@@ -1021,5 +1419,191 @@ writePowerLabels:
 	lcd_write_data_direct '2'
 	lcd_write_data_direct '/'
 	lcd_write_data_direct '3'
+
+	ret
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+printTimeToLCD_train:
+	rcall printTimeToLCD
+	jmp end
+;;;;;;;;;;;;;;;;;;;;;;;;;
+; updated display numbers
+.macro display_numbers ;load in number to be split into digits and displayed
+	push temp1
+	push temp2
+	
+	mov temp1, @0
+	clr temp2
+
+	rcall checkTensDigit
+
+	pop temp2
+	pop temp1
+.endmacro
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; temp1 -- current number to be displayed / parsed
+;; temp2 -- the number of <hundreds/tens/ones> found in temp1
+; -- check if the number has a tens digit, if none left,
+; then push number of tens onto stack	
+checkTensDigit: 
+	cpi temp1, 10 
+	brsh incTens ; branch if temp1 >= 10
+	push temp2
+	clr temp2
+; -- push the number of ones digits onto stack
+addones: 
+	push temp1
+	jmp popDigits
+
+incTens: ; increment number of tens
+	subi temp1, 10
+	inc temp2
+	rjmp checkTensDigit
+
+; pop stored digits off stack
+popDigits: 
+
+	clr temp1
+	clr temp2
+
+	pop temp2 ; ones
+	pop temp1 ; tens
+
+; display tens and ones
+	lcd_write_digit temp1 ; tens
+	lcd_write_digit temp2 ; ones
+
+cleanup:
+	clr temp1
+	clr temp2
+	ret
+
+	;;;;;;;;;;;;;;
+
+printTimeToLCD:
+	lcd_write_com LCD_DISP_CLR ;clear the display
+	lcd_wait_busy ;take yo time buddy
+
+	display_numbers mins
+	lcd_write_data_direct ':'
+	display_numbers secs
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	jmp turntable_train
+
+;;;;;;;;;;;;;;;;;;;;
+writeFinishedText_train:
+	rcall writeFinishedText
+jmp end	
+
+writeFinishedText_timertrain:
+	rcall writeFinishedText
+ret
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+writeFinishedText:
+	lcd_write_com LCD_DISP_CLR ;clear the display
+	lcd_wait_busy ;take yo time buddy
+	
+	lcd_write_data_direct 'D'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'n'
+	lcd_write_data_direct 'e'
+	lcd_write_com LCD_NEW_LINE
+	lcd_write_data_direct 'R'
+	lcd_write_data_direct 'e'
+	lcd_write_data_direct 'm'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'v'
+	lcd_write_data_direct 'e'
+	lcd_write_data_direct ' '
+	lcd_write_data_direct 'F'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'd'
+
+	reti
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+handleOpenDoor_train:
+	rcall writeDoorIsOpen
+	jmp end
+
+handleOpenDoor_interrupttrain:
+	rcall writeDoorIsOpen
+	jmp OPEN_DOOR_cont
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+writeDoorIsOpen:
+	lcd_write_data_direct 'D'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'r'
+	lcd_write_data_direct ' '
+	lcd_write_data_direct 'i'
+	lcd_write_data_direct 's'
+	lcd_write_data_direct ' '
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'p'
+	lcd_write_data_direct 'e'
+	lcd_write_data_direct 'n'
+	lcd_write_com LCD_NEW_LINE
+	lcd_write_data_direct 'P'
+	lcd_write_data_direct 'l'
+	lcd_write_data_direct 'e'
+	lcd_write_data_direct 'a'
+	lcd_write_data_direct 's'
+	lcd_write_data_direct 'e'
+	lcd_write_data_direct ' '
+	lcd_write_data_direct 'C'
+	lcd_write_data_direct 'l'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 's'
+	lcd_write_data_direct 'e'
+
+	reti
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+writeDoorIsClosed_train:
+	rcall writeDoorIsClosed
+jmp CLOSE_DOOR_cont_from_writeDoorIsClosed
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+writeDoorIsClosed:
+	lcd_write_data_direct 'K'
+	lcd_write_data_direct 'e'
+	lcd_write_data_direct 'e'
+	lcd_write_data_direct 'p'
+	lcd_write_data_direct ' '
+	lcd_write_data_direct 'c'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'k'
+	lcd_write_data_direct 'i'
+	lcd_write_data_direct 'n'
+	lcd_write_data_direct '"'
+	lcd_write_com LCD_NEW_LINE
+	lcd_write_data_direct 'G'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'd'
+	lcd_write_data_direct ' '
+	lcd_write_data_direct 'L'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'o'
+	lcd_write_data_direct 'k'
+	lcd_write_data_direct 'i'
+	lcd_write_data_direct 'n'
+	lcd_write_data_direct '"'
 
 	ret

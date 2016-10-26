@@ -98,7 +98,7 @@ update {
 		time is ticking
 		if time ran out
 			mode = finished
-			display done, remove food
+			display done, remove food - rcall writeFinishedText
 	else 
 		stop turntable
 		stop magnetron
