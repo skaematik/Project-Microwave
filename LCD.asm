@@ -844,8 +844,14 @@ convert_end:
 						jmp end
 
 				add1Min:
+					cpi mins, 99
+					breq add1Min_end
+					subi mins, -1
+					jmp add1Min_end
 
-				jmp end
+					add1Min_end:
+						rcall printTimeToLCD
+						jmp end
 
 				goToPaused:
 
