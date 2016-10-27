@@ -1,0 +1,43 @@
+Notes
+-use call or rcall for playsound - reduces code & improves readability.
+- you're free to change the label names
+;;;;;;;;;;;;;;;;;;;;;
+;;logic for timer 2.
+;;;;;;;;;;;;;;;;;;;
+
+TIMER2:
+
+	;;;; section for 250ms beep.
+	call playSoundL
+
+	if outputtingSound == 1 ; if we want to output sound, then
+		call playSoundH ;THIS WILL OUTPUT SOME SOUND
+
+	if start250msBeep == 1 ; if a keypad button has been pressed, this flag will be set to 1.
+		start250msBeep = 0 ;we acknowledge the button is pressed
+		outputtingSound = 1 ;we want to output sound now.
+		250msCounter = 0 ;reset the counter
+
+	if 250msCounter == <ARBITRARY VALUE> ;if 250ms is up
+		outputtingSound = 0 ;we dont want to output sound anymore.
+	else 
+		250msCounter++
+
+	;;;; section for 1 sec alternating beep, for 3 times.
+	if playFinishSound == 1
+		; play your 1 sec long beeps 3 times, then you set playFinishSound to 0.
+		; stephen you decide how to do this
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;
+; function definitions are here
+;;;;;;;;;;;;;;;;;;;;;;
+
+playSoundL:
+	out PORTB, <SOMETHING HERE>
+	ret
+
+playSoundH:
+	out PORTB, <something here>
+	ret
