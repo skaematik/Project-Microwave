@@ -70,9 +70,10 @@
 	jmp CLOSE_DOOR
 .org INT1addr
 	jmp OPEN_DOOR
+.org OVF2addr 
+	jmp TIMER2
 .org OVF0addr 
 	jmp TIMER
-	jmp default
 
 default:
 	reti
@@ -108,7 +109,7 @@ default:
 .equ LCD_DISP_OFF = 8
 .equ LCD_DISP_CLR = 1
 .equ LCD_ENTRY_SET = 6
-.equ LCD_DISP_ON = 15
+.equ LCD_DISP_ON = 14
 .equ LCD_SHIFT_LEFT = 16
 
 .equ LCD_N = 1
@@ -310,6 +311,14 @@ RESET:
 	ldi temp1, 1 << TOIE0 
 	sts TIMSK0, temp1 ;T/C0 interrupt enable
 
+	; Timer 2
+	ldi temp1, 0b00000000
+	sts TCCR2A, temp1
+	ldi temp1, 0b00000010
+	sts TCCR2B, temp1 
+	ldi temp1, 1 << TOIE2 
+	sts TIMSK2, temp1 
+
 	sei ;set global interrupt flag (I) in sreg
 
 	; Interrupts for push buttons (INT0 and INT1)
@@ -490,7 +499,7 @@ isDigit:
 	add temp1, v
 	getVar col, v 
 	add temp1, v ; temp1 = row*3 + col 
-	subi temp1, -1 ; Add the value of character â€˜1â€™ 
+	subi temp1, -1 ; Add the value of character 1
 
 	; ldi temp2, 10 ;multiply current number by ten then add the new digit
 	; mul current, temp2
@@ -915,10 +924,14 @@ convert_end:
 
 					minus30Secs_specialCase:
 						cpi mins, 0
-						breq minus30Secs_end
+						breq goToFinished_train
 						subi secs, -30
 						subi mins, 1
 						jmp minus30Secs_end
+
+						goToFinished_train:
+							call finished
+							jmp end
 
 					minus30Secs_end:
 						call printTimeToLCD
@@ -979,6 +992,7 @@ convert_end:
 				setVar mode, v
 
 				call resumeMotor
+				call toggleRotationDirection
 
 				call printTimeToLCD
 				jmp end
@@ -991,11 +1005,11 @@ convert_end:
 				ldi v, 0
 				setVar functionsRunning, v
 				setVar magnetronRunning, v
-				
+
 				rcall clearTimeAndDigits
 				rcall printDigitsToLCD
 
-				call toggleRotationDirection
+				; call toggleRotationDirection
 
 				jmp end
 
@@ -1168,11 +1182,11 @@ OPEN_DOOR:
 		ldi v, 1
 		setVar mode, v
 
-		; lcd_write_com LCD_DISP_CLR ;clear the display
-		; lcd_wait_busy ;take yo time buddy
+		lcd_write_com LCD_DISP_CLR ;clear the display
+		lcd_wait_busy ;take yo time buddy
 		
 		rcall clearTimeAndDigits
-		; rcall printDigitsToLCD
+		rcall printDigitsToLCD
 
 		rjmp OPEN_DOOR_end
 
@@ -1471,27 +1485,7 @@ updateTime:
 		ret
 
 	goToFinished:
-		; Set mode
-		ldi v, 5
-		setVar mode, v
-
-		; Resets timers
-		ldi v, 0
-		setVar counter, v
-		setVar counter250, v
-		setVar counter500, v
-		setVar counter1000, v
-		setVar counter5000, v
-		setVar magnetronCounter, v
-
-		call setMotorOff
-
-		; Set to not running
-		ldi v, 0
-		setVar functionsRunning, v
-		setVar magnetronRunning, v
-
-		call writeFinishedText
+		call finished
 
 	ret
 
@@ -1549,7 +1543,12 @@ updateMagnetron:
 				call setMotorOff
 				ret
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; Timer 2
+
+TIMER2:
+	reti
 
 ;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1784,4 +1783,31 @@ resumeMotor:
 pauseMotor:
 	ldi v, MOTOROFF
 	sts PORTH, v
+	ret
+
+;;;;;;;;;;;;;;;;
+
+finished:
+	; Set mode
+	ldi v, 5
+	setVar mode, v
+
+	; Resets timers
+	ldi v, 0
+	setVar counter, v
+	setVar counter250, v
+	setVar counter500, v
+	setVar counter1000, v
+	setVar counter5000, v
+	setVar magnetronCounter, v
+
+	call setMotorOff
+
+	; Set to not running
+	ldi v, 0
+	setVar functionsRunning, v
+	setVar magnetronRunning, v
+
+	call writeFinishedText
+
 	ret
