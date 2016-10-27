@@ -7,6 +7,7 @@
 .def on = r18
 .def temp1 = r19
 .def temp = r20
+.def counter1 = r21
 
 
 ; The macro clears a word (2 bytes) in a memory 
@@ -64,6 +65,7 @@ start:
 	sei ;set global interrupt flag (I) in sreg
 
 	clr on
+	ldi counter1, 3
 	; -- rjmp
 	rjmp main
 
@@ -102,8 +104,11 @@ continue:
 	rjmp timerFinish
 
 turnon:
+	cpi counter, 0
+	breq timerFinish
 	ldi patternL, 0xFF
 	ldi on, 1
+	dec counter1
 	rjmp timerFinish
 
 timerNotSecondYet: ; Store the new value of the temp counter
