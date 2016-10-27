@@ -274,10 +274,10 @@ START:
 
 
 	ldi temp1, 0xFF
-	setVar var, temp1
+	setVar temp2, temp1
 
 	ldi temp1, 0xEE
-	getVar var, temp1
+	getVar temp2, temp1
 	
 END:
 	jmp END
