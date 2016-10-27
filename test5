@@ -1,0 +1,15 @@
+.include "m2560def.inc"
+
+.def v = r16
+
+
+	
+start:
+	ldi v, 0b00001000
+	sts DDRH, v
+	ldi v, 0b00001000
+	sts PORTH, v
+
+
+reset:
+	jmp reset
