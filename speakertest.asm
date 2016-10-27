@@ -39,10 +39,10 @@ start:
 	out SPH, temp
 
 
-ser temp
-out DDRC, temp
-clr temp
-out PORTC, temp
+; ser temp
+; out DDRC, temp
+; clr temp
+; out PORTC, temp
 
 	; -- portB
 	ser temp ;set PORTB as output
