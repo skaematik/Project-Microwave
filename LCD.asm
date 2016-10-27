@@ -314,7 +314,7 @@ RESET:
 	; Timer 2
 	ldi temp1, 0b00000000
 	sts TCCR2A, temp1
-	ldi temp1, 0b00000010
+	ldi temp1, 0b00000100
 	sts TCCR2B, temp1 
 	ldi temp1, 1 << TOIE2 
 	sts TIMSK2, temp1 
