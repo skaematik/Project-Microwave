@@ -55,8 +55,12 @@
 	magnetronCounter: .byte 1
 	magnetronRunning: .byte 1
 
-	; turntable
+	; Turntable
+	; Specifies which character is being displayed
 	index: .byte 1
+	; The direction that the turntable is rotating in.
+	; CCWrotation = 1 meaning it is CCW
+	CCWrotation: .byte 1
 
 	
 .cseg
@@ -74,7 +78,8 @@ default:
 	reti
 
 
-
+.equ MOTORON = 0b00001000
+.equ MOTOROFF = 0
 
 
 .equ PORTLDIR = 0xF0 ; PD7-4: output, PD3-0, input 
@@ -103,7 +108,8 @@ default:
 .equ LCD_DISP_OFF = 8
 .equ LCD_DISP_CLR = 1
 .equ LCD_ENTRY_SET = 6
-.equ LCD_DISP_ON = 14
+.equ LCD_DISP_ON = 15
+.equ LCD_SHIFT_LEFT = 16
 
 .equ LCD_N = 1
 .equ LCD_ID = 1
@@ -124,6 +130,7 @@ default:
 .endmacro
 
 .macro lcd_write_data_direct
+	; push temp2
 	ldi temp2, @0 
 	out PORTF, temp2 ; set the data port's value up 
 	sbi PORTA, LCD_RS ; RS = 1, RW = 0 for a data write 
@@ -134,6 +141,7 @@ default:
 	delay 1000 ; delay to meet timing (Enable cycle time) 
 	cbi PORTA, LCD_RS
 	lcd_wait_busy
+	; pop temp2
 .endmacro
 
 .macro lcd_write_data_register
@@ -267,6 +275,10 @@ RESET:
 	ldi temp1, high(RAMEND) 
 	out SPH, temp1 
 
+	; Magnetron/motor init
+	ldi v, 0b00001000
+	sts DDRH, v
+
 	; Keypad init
 	ldi temp1, PORTLDIR ; PA7:4/PA3:0, out/in 
 	sts DDRL, temp1 
@@ -274,6 +286,10 @@ RESET:
 	; LED init
 	ser temp1 ; PORTC is set as output 
 	out DDRC, temp1 
+
+	; Top LED init
+	ser temp1
+	out DDRG, temp1
 
 	; LCD init
 	ser temp1
@@ -341,6 +357,8 @@ RESET:
 	; Door is not initially open
 	ldi v, 0
 	setVar doorIsOpen, v
+	ldi v, 0
+	call setDoorLEDClosed
 
 	; Mode is initially entry
 	ldi v, 1
@@ -372,12 +390,18 @@ RESET:
 	; turntable
 	ldi v, 0
 	setVar index, v
+	ldi v, 1
+	setVar CCWrotation, v
 
 	; Set power level to 100
 	ldi v, 100
 	setVar power, v
 	ldi temp1, 0xFF
 	out PORTC, temp1
+
+	; Motor is not initally running
+	ldi v, MOTOROFF
+	sts PORTH, v
 
 	; Init with 0 0 display
 	rcall printDigitsToLCD
@@ -466,7 +490,7 @@ isDigit:
 	add temp1, v
 	getVar col, v 
 	add temp1, v ; temp1 = row*3 + col 
-	subi temp1, -1 ; Add the value of character �1� 
+	subi temp1, -1 ; Add the value of character â€˜1â€™ 
 
 	; ldi temp2, 10 ;multiply current number by ten then add the new digit
 	; mul current, temp2
@@ -553,9 +577,7 @@ isZero:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Handle the key that was pressed
 convert_end: 
-	lcd_write_com LCD_DISP_CLR ;clear the display
-	lcd_wait_busy ;take yo time buddy
-
+	
 
 ; Logic:
 	; if open == true 
@@ -568,9 +590,8 @@ convert_end:
 		rjmp handleOpenDoor
 
 	handleOpenDoor:
-		jmp handleOpenDoor_train
+		jmp end
 
-		
 
 ; Branch
 	; if mode == entry
@@ -580,6 +601,9 @@ convert_end:
 	; elsif mode == finished
 
 	checkModes:
+		lcd_write_com LCD_DISP_CLR ;clear the display
+		lcd_wait_busy ;take yo time buddy
+
 		getVar mode, v
 
 		cpi v, 1
@@ -681,7 +705,7 @@ convert_end:
 				ldi v, 2
 				setVar mode, v
 
-				rcall writePowerLabels
+				call writePowerLabels
 
 				jmp end		
 
@@ -714,7 +738,7 @@ convert_end:
 
 					; Print
 					convertDigitsToTime
-					jmp printTimeToLCD_train
+					call printTimeToLCD
 
 				jmp end
 
@@ -842,8 +866,6 @@ convert_end:
 	; 		mode = paused
 
 		handleRunningMode_keypad:
-			ldi v, 0x03
-			out PORTC, v
 
 			getVar currentInput, v
 
@@ -877,7 +899,7 @@ convert_end:
 						jmp add30Secs_end
 
 					add30Secs_end:
-						jmp printTimeToLCD_train
+						call printTimeToLCD
 						jmp end
 
 				; if secs >= 30
@@ -899,7 +921,7 @@ convert_end:
 						jmp minus30Secs_end
 
 					minus30Secs_end:
-						jmp printTimeToLCD_train
+						call printTimeToLCD
 						jmp end
 
 				add1Min:
@@ -909,19 +931,21 @@ convert_end:
 					jmp add1Min_end
 
 					add1Min_end:
-						jmp printTimeToLCD_train
+						call printTimeToLCD
 						jmp end
 
 				goToPaused:
 					ldi v, 4
 					setVar mode, v
 
-					jmp printTimeToLCD_train
+					call pauseMotor
+
+					call printTimeToLCD
 
 					jmp end
 
 			handleRunningMode_keypad_else:
-				jmp printTimeToLCD_train
+				call printTimeToLCD
 
 				jmp end
 
@@ -939,8 +963,6 @@ convert_end:
 	; 			mode = running
 
 		handlePausedMode_keypad:
-			ldi v, 0x04
-			out PORTC, v
 
 			getVar currentInput, v
 
@@ -956,20 +978,29 @@ convert_end:
 				ldi v, 3
 				setVar mode, v
 
-				jmp printTimeToLCD_train
+				call resumeMotor
+
+				call printTimeToLCD
 				jmp end
 
 			goToEntryModeAgain:
 				ldi v, 1
 				setVar mode, v
 
+
+				ldi v, 0
+				setVar functionsRunning, v
+				setVar magnetronRunning, v
+				
 				rcall clearTimeAndDigits
 				rcall printDigitsToLCD
+
+				call toggleRotationDirection
 
 				jmp end
 
 			handlePausedMode_keypad_else:
-				jmp printTimeToLCD_train
+				call printTimeToLCD
 
 				jmp end
 
@@ -980,9 +1011,6 @@ convert_end:
 	; 		mode = entry
 
 		handleFinishedMode_keypad:
-			ldi v, 0x05
-			out PORTC, v
-
 			getVar currentInput, v
 			cpi v, '#'
 			breq fromFinishedToEntry
@@ -1000,8 +1028,6 @@ convert_end:
 			handleFinishedMode_keypad_else:
 				jmp writeFinishedText_train
 				
-
-
 ;;;;;;;;;;;;;;;;;;;;;;
 end:
 
@@ -1018,13 +1044,6 @@ wait2:  ;wait until button is released
 final:
  ;restart yo ass
 	jmp main
-
-
-
-
-
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 printDigitsToLCD:
@@ -1052,7 +1071,10 @@ printDigitsToLCD:
 	lcd_write_data_direct ' '
 	lcd_write_data_direct ' '
 	lcd_write_data_direct ' '
-	jmp turntable_train
+	call turntable
+
+
+	call writeSecondLineToDisplay
 
 	ret
 
@@ -1074,13 +1096,10 @@ clearTimeAndDigits:
 
 
 ;;;;;;;;;;;;;;;;;;;;;
-turntable_train:
-	rcall turntable
-	ret
-;;;;;;;;;;;;;;;;;;;;;
 
 ; turntable - displays current index character on screen
 turntable:
+	push temp1
 	getVar index, temp1
 	cpi temp1, 0
 	breq index0
@@ -1107,36 +1126,82 @@ turntable:
 
 	turntable_display:
 		lcd_write_data_register temp1
-		clr temp1
+		pop temp1
 
 	ret
 ;;;;;;;;;;;;;;;;;;;;
-
+; INTERRUPTS
 
 OPEN_DOOR:
 	; -- save
-	in temp1, SREG ;save SREG
+	
+	push temp1
+	push temp2
+	push temp3
+	push v
+	push XL
+	push XH
+	in temp1, SREG 
 	push temp1
 
 	; -- instructions
-	lcd_write_com LCD_DISP_CLR ;clear the display
-	lcd_wait_busy ;take yo time buddy
 
-	jmp handleOpenDoor_interrupttrain
-OPEN_DOOR_cont:
 	ldi temp2, 1
 	setVar doorIsOpen, temp2
-	ldi temp2, 0b10000000
-	out PORTC, temp2
 
-	; -- restore
-	pop temp1 ;restore SREG
-	out SREG, temp1
-	reti ;return from interrupt
+	call setDoorLEDOpen
+	call pauseMotor
+
+	getVar mode, v
+	cpi v, 3
+	breq runningToPausedSinceDoorOpened
+	cpi v, 5
+	breq finishedToEntrySinceDoorOpened
+	rjmp OPEN_DOOR_end
+
+	runningToPausedSinceDoorOpened:
+		ldi v, 4
+		setVar mode, v
+		rjmp OPEN_DOOR_end
+
+	finishedToEntrySinceDoorOpened:
+		ldi v, 1
+		setVar mode, v
+
+		; lcd_write_com LCD_DISP_CLR ;clear the display
+		; lcd_wait_busy ;take yo time buddy
+		
+		rcall clearTimeAndDigits
+		; rcall printDigitsToLCD
+
+		rjmp OPEN_DOOR_end
+
+	OPEN_DOOR_end:
+		; -- restore
+		lcd_write_com LCD_SHIFT_LEFT
+		call writeDoorStateToDisplay
+
+		
+		pop temp1
+		out SREG, temp1
+		pop XH
+		pop XL
+		pop v
+		pop temp3
+		pop temp2
+		pop temp1
+
+		reti ;return from interrupt
 
 CLOSE_DOOR:
 
 	; -- save
+	push temp1
+	push temp2
+	push temp3
+	push v
+	push XL
+	push XH
 	in temp1, SREG 
 	push temp1
 
@@ -1147,22 +1212,27 @@ CLOSE_DOOR:
 	brne CLOSE_DOOR_cont
 	jmp CLOSE_DOOR_end
 
-CLOSE_DOOR_cont:
-	lcd_write_com LCD_DISP_CLR ;clear the display
-	lcd_wait_busy ;take yo time buddy
-	jmp writeDoorIsClosed_train
+	CLOSE_DOOR_cont:
 
-CLOSE_DOOR_cont_from_writeDoorIsClosed:
-	ldi temp2, 0
-	setVar doorIsOpen, temp2
-	ldi temp2, 0b00000101
-	out PORTC, temp2
+		ldi v, 0
+		setVar doorIsOpen, v
 
-	; -- restore
-CLOSE_DOOR_end:
-	pop temp1
-	out SREG, temp1
-	reti
+		call setDoorLEDClosed
+
+		lcd_write_com LCD_SHIFT_LEFT
+		call writeDoorStateToDisplay
+
+		; -- restore
+	CLOSE_DOOR_end:
+		pop temp1
+		out SREG, temp1
+		pop XH
+		pop XL
+		pop v
+		pop temp3
+		pop temp2
+		pop temp1
+		reti
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; if mode == running
@@ -1255,7 +1325,11 @@ TIMER:
 			setVar functionsRunning, v
 			setVar magnetronRunning, v
 
-			; OUTPUT PWM SIGNAL HERE
+			call toggleRotationDirection
+
+			; OUTPUT MOTOR SIGNAL HERE
+			call setMotorOn
+
 
 			jmp TIMER_end
 
@@ -1275,10 +1349,14 @@ TIMER:
 				clr v
 				setVar counter, v
 
+				getVar magnetronCounter, v
+				inc v
+				setVar magnetronCounter, v
+				call updateMagnetron
+
 				getVar counter250, v
 				inc v
 				setVar counter250, v
-				out PORTC, v
 
 				cpi v, 2
 				breq handle500Counter
@@ -1308,6 +1386,7 @@ TIMER:
 
 						rcall updateTime
 
+						getVar counter1000, v
 						cpi v, 5
 						breq handle5000Counter
 
@@ -1339,20 +1418,41 @@ TIMER_end:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 updateIndex:
-	getVar index, v
-	inc v
-	setVar index, v
-	cpi v, 4
-	breq setIndexBackToZero
-	jmp updateIndex_cont
-
-	setIndexBackToZero:
-		clr v
-		setVar index, v
-
-	updateIndex_cont:
-		; out PORTC, v
+	getVar CCWrotation, v
+	cpi v, 1
+	breq decrementIndex
+	cpi v, 0
+	breq incrementIndex
 	ret
+
+	decrementIndex:
+		getVar index, v
+		dec v
+		setVar index, v
+		jmp checkIndexValue
+
+	incrementIndex:
+		getVar index, v
+		inc v
+		setVar index, v
+		jmp checkIndexValue
+
+	checkIndexValue:
+		cpi v, 4
+		breq setIndexBackToZero
+		cpi v, -1
+		breq setIndexToThree 
+		ret
+
+		setIndexBackToZero:
+			clr v
+			setVar index, v
+			ret
+
+		setIndexToThree:
+			ldi v, 3
+			setVar index, v
+			ret
 
 updateTime:
 	cpi secs, 0
@@ -1367,7 +1467,7 @@ updateTime:
 		ldi secs, 59
 
 	updateTime_cont:
-		rcall printTimeToLCD
+		call printTimeToLCD
 		ret
 
 	goToFinished:
@@ -1384,20 +1484,70 @@ updateTime:
 		setVar counter5000, v
 		setVar magnetronCounter, v
 
+		call setMotorOff
+
 		; Set to not running
 		ldi v, 0
 		setVar functionsRunning, v
 		setVar magnetronRunning, v
 
-
-		; Stop PWN signal
-		; OUTPUT PWM SIGNAL HERE
-
-		jmp writeFinishedText_timertrain
+		call writeFinishedText
 
 	ret
 
 
+updateMagnetron:
+	getVar magnetronRunning, v
+	out PORTC, v
+
+	getVar power, v
+
+	cpi v, 100
+	breq updateMagnetron_end
+	cpi v, 50
+	breq updateMagnetron_checkTimeIsUp_50
+	cpi v, 25
+	breq updateMagnetron_checkTimeIsUp_25
+	ret
+
+	updateMagnetron_end:
+		ret
+
+	updateMagnetron_checkTimeIsUp_50:
+		getVar magnetronCounter, v
+		cpi v, 2
+		breq updateMagnetron_toggle
+		cpi v, 4
+		breq updateMagnetron_toggleAndResetCounter
+		ret
+
+	updateMagnetron_checkTimeIsUp_25:
+		getVar magnetronCounter, v
+		cpi v, 1
+		breq updateMagnetron_toggle
+		cpi v, 4
+		breq updateMagnetron_toggleAndResetCounter
+		ret
+
+		updateMagnetron_toggleAndResetCounter:
+			clr v
+			setVar magnetronCounter, v
+			jmp updateMagnetron_toggle
+
+		updateMagnetron_toggle:
+			getVar magnetronRunning, v
+			cpi v, 0
+			breq updateMagnetron_toggleOn
+			cpi v, 1
+			breq updateMagnetron_toggleOff
+			ret
+
+			updateMagnetron_toggleOn:
+				call setMotorOn
+				ret
+			updateMagnetron_toggleOff:
+				call setMotorOff
+				ret
 
 
 
@@ -1420,13 +1570,14 @@ writePowerLabels:
 	lcd_write_data_direct '/'
 	lcd_write_data_direct '3'
 
+	call turntable
+
+	call writeSecondLineToDisplay
+	
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-printTimeToLCD_train:
-	rcall printTimeToLCD
-	jmp end
 ;;;;;;;;;;;;;;;;;;;;;;;;;
 ; updated display numbers
 .macro display_numbers ;load in number to be split into digits and displayed
@@ -1499,16 +1650,17 @@ printTimeToLCD:
 	lcd_write_data_direct ' '
 	lcd_write_data_direct ' '
 	lcd_write_data_direct ' '
-	jmp turntable_train
+	call turntable
+
+
+	call writeSecondLineToDisplay
+
+	ret
 
 ;;;;;;;;;;;;;;;;;;;;
 writeFinishedText_train:
 	rcall writeFinishedText
 jmp end	
-
-writeFinishedText_timertrain:
-	rcall writeFinishedText
-ret
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 writeFinishedText:
@@ -1537,73 +1689,99 @@ writeFinishedText:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-handleOpenDoor_train:
-	rcall writeDoorIsOpen
-	jmp end
-
-handleOpenDoor_interrupttrain:
-	rcall writeDoorIsOpen
-	jmp OPEN_DOOR_cont
-;;;;;;;;;;;;;;;;;;;;;;;;;;;
-writeDoorIsOpen:
-	lcd_write_data_direct 'D'
-	lcd_write_data_direct 'o'
-	lcd_write_data_direct 'o'
-	lcd_write_data_direct 'r'
-	lcd_write_data_direct ' '
-	lcd_write_data_direct 'i'
-	lcd_write_data_direct 's'
-	lcd_write_data_direct ' '
-	lcd_write_data_direct 'o'
-	lcd_write_data_direct 'p'
-	lcd_write_data_direct 'e'
-	lcd_write_data_direct 'n'
+writeSecondLineToDisplay:
+	
 	lcd_write_com LCD_NEW_LINE
-	lcd_write_data_direct 'P'
-	lcd_write_data_direct 'l'
-	lcd_write_data_direct 'e'
-	lcd_write_data_direct 'a'
-	lcd_write_data_direct 's'
-	lcd_write_data_direct 'e'
-	lcd_write_data_direct ' '
-	lcd_write_data_direct 'C'
-	lcd_write_data_direct 'l'
-	lcd_write_data_direct 'o'
-	lcd_write_data_direct 's'
-	lcd_write_data_direct 'e'
 
-	reti
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-writeDoorIsClosed_train:
-	rcall writeDoorIsClosed
-jmp CLOSE_DOOR_cont_from_writeDoorIsClosed
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	lcd_write_data_direct 'E'
+	lcd_write_data_direct '1'
+	lcd_write_data_direct '0'
 
-writeDoorIsClosed:
-	lcd_write_data_direct 'K'
-	lcd_write_data_direct 'e'
-	lcd_write_data_direct 'e'
-	lcd_write_data_direct 'p'
 	lcd_write_data_direct ' '
-	lcd_write_data_direct 'c'
-	lcd_write_data_direct 'o'
-	lcd_write_data_direct 'o'
-	lcd_write_data_direct 'k'
-	lcd_write_data_direct 'i'
-	lcd_write_data_direct 'n'
-	lcd_write_data_direct '"'
-	lcd_write_com LCD_NEW_LINE
-	lcd_write_data_direct 'G'
-	lcd_write_data_direct 'o'
-	lcd_write_data_direct 'o'
-	lcd_write_data_direct 'd'
 	lcd_write_data_direct ' '
-	lcd_write_data_direct 'L'
-	lcd_write_data_direct 'o'
-	lcd_write_data_direct 'o'
-	lcd_write_data_direct 'k'
-	lcd_write_data_direct 'i'
-	lcd_write_data_direct 'n'
-	lcd_write_data_direct '"'
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
+	lcd_write_data_direct ' '
 
+	rcall writeDoorStateToDisplay
+
+	ret
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+writeDoorStateToDisplay:
+	getVar doorIsOpen, v
+	cpi v, 0
+	breq writeC_train
+	cpi v, 1
+	breq writeO_train
+	ret
+
+	writeC_train:
+		jmp writeC
+
+	writeO_train:
+		jmp writeO
+	
+			writeC:
+				lcd_write_data_direct 'C'
+				ret
+
+			writeO:
+				lcd_write_data_direct 'O'
+				ret
+;;;;;;;;;;;;;;;;;;
+
+toggleRotationDirection:
+	getVar CCWrotation, v
+	ldi temp1, 1
+	EOR v, temp1
+	setVar CCWrotation, v
+	ret
+	
+;;;;;;;;;;;;;;;;;;;;;
+
+setDoorLEDClosed:
+	ldi v, 0
+	out PORTG, v
+	ret
+
+setDoorLEDOpen:
+	ldi v, 2
+	out PORTG, v
+	ret
+	
+;;;;;;;;;;;;;;;;;
+setMotorOn:
+	ldi v, MOTORON
+	sts PORTH, v
+
+	ldi v, 1
+	setVar magnetronRunning, v
+	ret
+setMotorOff:
+	ldi v, MOTOROFF
+	sts PORTH, v
+
+	clr v
+	setVar magnetronRunning, v
+	ret
+
+resumeMotor:
+	getVar magnetronRunning, v
+	cpi v, 0
+	breq setMotorOff
+	cpi v, 1
+	breq setMotorOn
+	ret
+
+pauseMotor:
+	ldi v, MOTOROFF
+	sts PORTH, v
 	ret
