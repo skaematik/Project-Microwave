@@ -89,26 +89,7 @@ if needToUpdateTurntable == 1
 
 ------------------------------------------
 Timer
-update {
-	if mode == running
-		update turntable
-		update magnetron
-
-
-		time is ticking
-		if time ran out
-			mode = finished
-			display done, remove food - rcall writeFinishedText
-	else 
-		stop turntable
-		stop magnetron
-		time isnt ticking
-}
-
-
 counter {
-
-
 if mode == running
 	if stuff is not running
 		reset timers
@@ -136,8 +117,12 @@ if mode == running
 			500counter++
 
 		if 500counter == 2
+			IF TIME == 0
+			 	go to finished mode
+				display done, remove food - rcall writeFinishedText
 			reset 500counter
 			1000counter++
+			UPDATETIME ON LCD
 
 		if 1000counter == 5
 			reset 1000counter
@@ -157,3 +142,21 @@ updatemagnetron
 			turn magnetron off
 		else
 			output pwm for 100 rev/min
+
+
+
+update {
+	if mode == running
+		update turntable
+		update magnetron
+
+
+		time is ticking
+		if time ran out
+			mode = finished
+			display done, remove food - rcall writeFinishedText
+	else 
+		stop turntable
+		stop magnetron
+		time isnt ticking
+}

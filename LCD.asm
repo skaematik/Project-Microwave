@@ -1,13 +1,6 @@
-
-
-; STUB CODE 
-; includes code for displaying the number pressed on the
-; keypad onto the LCD screen
-
-; taken & modified from lab 4, part D
-
-; The program gets input from keypad and displays its ascii value on the 
-; LED bar
+; Group: E10
+; Annie Zhang / Stephen Chung
+; z3459054 / z
 
 .include "m2560def.inc" 
 ; .def row = r16 ; current row number 
@@ -42,8 +35,8 @@
 	d: .byte 1
 
 	; Functions refer to magnetron, turntable and timers
+	; This restarts everytime operation is stopped completed
 	functionsRunning: .byte 1
-
 
 	; Timers
 	counter: .byte 1
@@ -52,6 +45,7 @@
 	counter1000: .byte 1
 	counter5000: .byte 1
 
+	; Magnetron variables
 	magnetronCounter: .byte 1
 	magnetronRunning: .byte 1
 
@@ -61,7 +55,6 @@
 	; The direction that the turntable is rotating in.
 	; CCWrotation = 1 meaning it is CCW
 	CCWrotation: .byte 1
-
 	
 .cseg
 .org 0x0000
@@ -75,14 +68,12 @@
 .org OVF0addr 
 	jmp TIMER
 
-default:
-	reti
-
+; Value to drive the magnetron on or off.
 
 .equ MOTORON = 0b00001000
 .equ MOTOROFF = 0
 
-
+; Keypad
 .equ PORTLDIR = 0xF0 ; PD7-4: output, PD3-0, input 
 .equ INITCOLMASK = 0xEF ; scan from the rightmost column, \
 .equ INITROWMASK = 0x01 ; scan from the top row 
@@ -187,11 +178,6 @@ busy_loop:
 	pop temp1 
 .endmacro
 
-
-;.equ F_CPU = 16000000
-;.equ DELAY_1MS = F_CPU / 4 / 1000 - 4
-; 4 cycles per iteration - setup/call-return overhead
-
 .macro delay
 	push del_lo
 	push del_hi
@@ -205,9 +191,6 @@ loop:
 	pop del_hi
 	pop del_lo
 .endmacro
-
-
-
 
 ; convertDigitsToTime - a, b, c, d to mins and secs
 .macro convertDigitsToTime
@@ -490,10 +473,6 @@ isDigit:
 	getVar row, v
 	mov temp1, v ; Otherwise we have a number in 1-9 
 
-	; Dont display if larger than 100 
-	; cpi current, 100
-	; brsh convert_end_connector
-
 	lsl temp1 
 	getVar row, v
 	add temp1, v
@@ -501,16 +480,10 @@ isDigit:
 	add temp1, v ; temp1 = row*3 + col 
 	subi temp1, -1 ; Add the value of character 1
 
-	; ldi temp2, 10 ;multiply current number by ten then add the new digit
-	; mul current, temp2
-	; mov current, r0
-	; add current, temp1
-
 	setVar currentInput, temp1
 	clr temp1
 	clr temp2
 	clr r0
-	;subi temp1, -48
 	jmp convert_end
 
 isLetter: 
@@ -571,14 +544,6 @@ isStar:
 	jmp convert_end 
 
 isZero: 
-	; cpi current, 100
-	; brsh convert_end
-
-	; ldi temp2, 10 ;times current number by 10 (ie adding a zero to the end)
-	; mul current, temp2
-	; mov current, r0
-	; clr temp2
-	; clr r0
 	ldi v, 0
 	setVar currentInput, v
 	jmp convert_end
@@ -586,7 +551,6 @@ isZero:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Handle the key that was pressed
 convert_end: 
-	
 
 ; Logic:
 	; if open == true 
@@ -639,7 +603,7 @@ convert_end:
 
 		jmp error
 	error:
-		jmp error
+		jmp end
 
 ; Entry mode
 	; if 0-9
@@ -970,11 +934,6 @@ convert_end:
 	; 	if #
 	;       mode = entry
 
-	; 		if open = true
-	; 			pass
-	; 		else
-	; 			mode = running
-
 		handlePausedMode_keypad:
 
 			getVar currentInput, v
@@ -1009,8 +968,6 @@ convert_end:
 				rcall clearTimeAndDigits
 				rcall printDigitsToLCD
 
-				; call toggleRotationDirection
-
 				jmp end
 
 			handlePausedMode_keypad_else:
@@ -1040,14 +997,15 @@ convert_end:
 				jmp end
 
 			handleFinishedMode_keypad_else:
-				jmp writeFinishedText_train
+				call writeFinishedText
+				jmp end
 				
 ;;;;;;;;;;;;;;;;;;;;;;
 end:
 
 wait2:  ;wait until button is released
 	lds v, PINL ; Read PORTL
-	andi v, 0x0F ; rowmask of 0x0f
+	andi v, 0x0F ; Rowmask of 0x0F
 	cpi v, 0x0F
 
 	breq final
@@ -1056,10 +1014,11 @@ wait2:  ;wait until button is released
 
 ;;;;;;;;;;;;;;;;;;;;;;
 final:
- ;restart yo ass
 	jmp main
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; The printDigitsToLCD function will, in entry mode,
+; display the correct time, turntable, group number and door state.
 printDigitsToLCD:
 	getVar a, v
 	lcd_write_digit v
@@ -1085,16 +1044,17 @@ printDigitsToLCD:
 	lcd_write_data_direct ' '
 	lcd_write_data_direct ' '
 	lcd_write_data_direct ' '
-	call turntable
 
+	call turntable
 
 	call writeSecondLineToDisplay
 
 	ret
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;
-
+; The clearTimeAndDigits function will clear the a, b, c and d
+; time variables used in entry mode as well as the mins and secs 
+; registers used during running mode.
 clearTimeAndDigits:
 	ldi v, 0
 	setVar a, v
@@ -1107,11 +1067,10 @@ clearTimeAndDigits:
 
 	ret
 
-
-
 ;;;;;;;;;;;;;;;;;;;;;
-
-; turntable - displays current index character on screen
+; The turntable function will, according to the current character 
+; it should be displaying, specified by the index variable, display 
+; that character on the display
 turntable:
 	push temp1
 	getVar index, temp1
@@ -1431,6 +1390,11 @@ TIMER_end:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; The updateIndex function will, when called, either increment or
+; decrement the index variable between the bounds of 0 and 3 inclusive
+; according to whether the CCWrotation variable is set or not. The 
+; turntable will turn counter-clockwise if the CCWrotation variable is
+; set to 1.
 updateIndex:
 	getVar CCWrotation, v
 	cpi v, 1
@@ -1468,6 +1432,9 @@ updateIndex:
 			setVar index, v
 			ret
 
+; The updateTime function will decrement 1 second from the time 
+; represented by the mins and secs registers and print this on the
+; display.
 updateTime:
 	cpi secs, 0
 	breq minus1Sec_SpecialCase
@@ -1489,7 +1456,10 @@ updateTime:
 
 	ret
 
-
+; The updateMagnetron function, when called, will check which segment
+; of the second has been reached, and then therefore will decide whether
+; to turn the magnetron on or off. It will then set the magnetron to be
+; on or off.
 updateMagnetron:
 	getVar magnetronRunning, v
 	out PORTC, v
@@ -1552,6 +1522,8 @@ TIMER2:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;
 
+; The writePowerLabels function will display “Set Power 1/2/3”
+; as well as the turntable, group number and door state.
 writePowerLabels:
 	lcd_write_data_direct 'S'
 	lcd_write_data_direct 'e'
@@ -1576,10 +1548,10 @@ writePowerLabels:
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;;;;;;;;;;;;;;;;;;;;;;;;
-; updated display numbers
-.macro display_numbers ;load in number to be split into digits and displayed
+; The display_numbers macro in actuality calls a checkTensDigit
+; function which splits the current time held in the mins and secs
+; registers into digits to be displayed on the screen.
+.macro display_numbers 
 	push temp1
 	push temp2
 	
@@ -1591,7 +1563,7 @@ writePowerLabels:
 	pop temp2
 	pop temp1
 .endmacro
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
 ;; temp1 -- current number to be displayed / parsed
 ;; temp2 -- the number of <hundreds/tens/ones> found in temp1
@@ -1630,11 +1602,12 @@ cleanup:
 	clr temp2
 	ret
 
-	;;;;;;;;;;;;;;
-
+;;;;;;;;;;;;;;
+; The printTimeToLCD function will, in running mode, display
+; the correct tim e, turntable, group number and door state.
 printTimeToLCD:
-	lcd_write_com LCD_DISP_CLR ;clear the display
-	lcd_wait_busy ;take yo time buddy
+	lcd_write_com LCD_DISP_CLR ; clear the display
+	lcd_wait_busy ; take yo time buddy
 
 	display_numbers mins
 	lcd_write_data_direct ':'
@@ -1649,19 +1622,17 @@ printTimeToLCD:
 	lcd_write_data_direct ' '
 	lcd_write_data_direct ' '
 	lcd_write_data_direct ' '
-	call turntable
 
+	call turntable
 
 	call writeSecondLineToDisplay
 
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;
-writeFinishedText_train:
-	rcall writeFinishedText
-jmp end	
-;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; The writeFinishedText function will display “Done\nRemove Food”
+; on the display.
 writeFinishedText:
 	lcd_write_com LCD_DISP_CLR ;clear the display
 	lcd_wait_busy ;take yo time buddy
@@ -1685,9 +1656,11 @@ writeFinishedText:
 
 	reti
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
+; The writeSecondLineToDisplay function will display the group
+; number and door state to the display. This is used in the
+; other functions that require writing the group number and 
+; door state.
 writeSecondLineToDisplay:
 	
 	lcd_write_com LCD_NEW_LINE
@@ -1713,7 +1686,8 @@ writeSecondLineToDisplay:
 
 	ret
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
+; The writeDoorStateToDisplay will write either a “C” or “O”
+; depending on whether the door is open or not, effective immediately.
 writeDoorStateToDisplay:
 	getVar doorIsOpen, v
 	cpi v, 0
@@ -1736,7 +1710,8 @@ writeDoorStateToDisplay:
 				lcd_write_data_direct 'O'
 				ret
 ;;;;;;;;;;;;;;;;;;
-
+; The toggleRotationDirection will toggle the value of CCWrotation 
+; by using an exclusive OR.
 toggleRotationDirection:
 	getVar CCWrotation, v
 	ldi temp1, 1
@@ -1745,7 +1720,8 @@ toggleRotationDirection:
 	ret
 	
 ;;;;;;;;;;;;;;;;;;;;;
-
+; The setDoorLEDClosed and setDoorLEDOpen functions will cause
+; the top LED to be on or off.
 setDoorLEDClosed:
 	ldi v, 0
 	out PORTG, v
@@ -1756,7 +1732,14 @@ setDoorLEDOpen:
 	out PORTG, v
 	ret
 	
-;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;
+; The setMotorOn, setMotorOff, resumeMotor and pauseMotor functions 
+; will turn the motor on or off. The difference between the first
+; two and last two are how they handle the behavior of the motor when it
+; is turned on again. When the motor is set to off using setMotorOff,
+; it will begin again from the start of its cycles rather than where it
+; left off when it was paused, which can be achieved by using pauseMotor.
 setMotorOn:
 	ldi v, MOTORON
 	sts PORTH, v
@@ -1786,7 +1769,8 @@ pauseMotor:
 	ret
 
 ;;;;;;;;;;;;;;;;
-
+; The finished function will set the mode to finished,
+; reset all counters, and turn off the magnetron and turntable.
 finished:
 	; Set mode
 	ldi v, 5

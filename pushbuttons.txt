@@ -27,7 +27,7 @@ start:
 
 
 
-EXT_INT0:
+OPEN_DOOR:
 	; -- save
 	in temp1, SREG ;save SREG
 	push temp1
@@ -43,7 +43,7 @@ EXT_INT0:
 	out SREG, temp1
 	reti ;return from interrupt
 
-EXT_INT1:
+CLOSE_DOOR:
 
 	; -- save
 	in temp1, SREG 
