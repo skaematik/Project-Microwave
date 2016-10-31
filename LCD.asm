@@ -1,6 +1,6 @@
 ; Group: E10
 ; Annie Zhang / Stephen Chung
-; z3459054 / z
+; z3459054 / z3463108
 
 .include "m2560def.inc" 
 ; .def row = r16 ; current row number 
@@ -55,7 +55,17 @@
 	; The direction that the turntable is rotating in.
 	; CCWrotation = 1 meaning it is CCW
 	CCWrotation: .byte 1
+
+	; Whether the finish sound should be playing or not
+	playFinishSound: .byte 1
+	finishSoundCounter: .byte 1
+	nFinishSounds: .byte 1
+	finishSoundIsOn: .byte 1
 	
+	; Beep 250ms
+	beepCounter: .byte 1
+	keyPressed: .byte 1
+
 .cseg
 .org 0x0000
 	jmp RESET
@@ -282,6 +292,14 @@ RESET:
 	clr temp1
 	out PORTF, temp1
 	out PORTA, temp1
+	
+
+	; Sound init
+	ser temp1 ; set PORTB as output
+	out DDRB, temp1
+
+	clr temp1 ; write 0 to PORTB
+	out PORTB, temp1
 
 	; Timer init
 	; -- Timer Counter Control Register for timer0
@@ -297,7 +315,7 @@ RESET:
 	; Timer 2
 	ldi temp1, 0b00000000
 	sts TCCR2A, temp1
-	ldi temp1, 0b00000100
+	ldi temp1, 0b00000101
 	sts TCCR2B, temp1 
 	ldi temp1, 1 << TOIE2 
 	sts TIMSK2, temp1 
@@ -394,6 +412,13 @@ RESET:
 	; Motor is not initally running
 	ldi v, MOTOROFF
 	sts PORTH, v
+
+	; Finish sound shouldnt be playing
+	ldi v, 0
+	setVar playFinishSound, v
+	setVar finishSoundCounter, v
+	setVar nFinishSounds, v
+	setVar finishSoundIsOn, v
 
 	; Init with 0 0 display
 	rcall printDigitsToLCD
@@ -551,6 +576,12 @@ isZero:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Handle the key that was pressed
 convert_end: 
+
+	; Register a keypress
+	clr v
+	setVar beepCounter, v
+	ldi v, 1
+	setVar keyPressed, v
 
 ; Logic:
 	; if open == true 
@@ -992,6 +1023,14 @@ convert_end:
 				ldi v, 1
 				setVar mode, v
 
+				ldi v, 0
+				setVar playFinishSound, v
+
+				ldi v, 0
+				setVar finishSoundCounter, v
+				setVar nFinishSounds, v
+				setVar finishSoundIsOn, v
+
 				rcall clearTimeAndDigits
 				rcall printDigitsToLCD
 				jmp end
@@ -1141,6 +1180,9 @@ OPEN_DOOR:
 		ldi v, 1
 		setVar mode, v
 
+		ldi v, 0
+		setVar playFinishSound, v
+
 		lcd_write_com LCD_DISP_CLR ;clear the display
 		lcd_wait_busy ;take yo time buddy
 		
@@ -1153,7 +1195,6 @@ OPEN_DOOR:
 		; -- restore
 		lcd_write_com LCD_SHIFT_LEFT
 		call writeDoorStateToDisplay
-
 		
 		pop temp1
 		out SREG, temp1
@@ -1516,8 +1557,125 @@ updateMagnetron:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Timer 2
+; if playFinishSound == 1
+; 	if on
+; 		out 0, 1
+; 	if off
+; 		out 0
+; 	if 1 sec has passed
+; 		clear counter
+; 		inc number of seconds passed
+; 		toggle on/off 
 
 TIMER2:
+
+	push temp1
+	push temp2
+	push temp3
+	in temp1, SREG  
+	push temp1 
+	push XH
+	push XL
+	push v
+
+	getVar playFinishSound, v
+	cpi v, 1 ; If it should be playing
+	breq play3Beeps
+
+	jmp TIMER2_continueHandling
+
+	play3Beeps:
+
+		getVar nFinishSounds, v
+		cpi v, 6
+		breq TIMER2_continueHandling
+
+		ldi v, 0
+		out PORTB, v
+
+		getVar finishSoundIsOn, v
+		cpi v, 1
+		breq playOn
+		jmp play3Beeps_cont
+
+			playOn:
+				delay 1000
+				ldi v, 0xFF
+				out PORTB, v
+				jmp play3Beeps_cont
+
+		play3Beeps_cont:
+			getVar finishSoundCounter, v
+			inc v
+			setVar finishSoundCounter, v
+			cpi v, 255
+			breq play3Beeps_secHasPassed
+			jmp TIMER2_continueHandling
+
+			play3Beeps_secHasPassed:
+				clr v
+				setVar finishSoundCounter, v
+
+				getVar nFinishSounds, v
+				inc v
+				setVar nFinishSounds, v
+
+				getVar finishSoundIsOn, v
+				ldi temp1, 1
+				EOR v, temp1
+				setVar finishSoundIsOn, v
+
+				jmp TIMER2_continueHandling
+
+ ; if keyPressed == 1
+ ; 	play sound
+ ; 		when 250ms is up
+ ; 			keyPressed = 0
+ 
+	TIMER2_continueHandling:
+		getVar keyPressed, v
+		cpi v, 1
+		breq beepOnceSinceKeyPressed
+
+		jmp TIMER2_END
+
+		beepOnceSinceKeyPressed:
+			ldi v, 0
+			out PORTB, v
+	
+			delay 1000
+	
+			ldi v, 0xFF
+			out PORTB, v
+
+			getVar beepCounter, v
+			inc v
+			setVar beepCounter, v
+			cpi v, 90
+			breq beepOnce_250msHasPassed
+		
+			jmp TIMER2_END
+
+			beepOnce_250msHasPassed:
+				clr v
+				setVar beepCounter, v
+
+				clr v
+				setVar keyPressed, v
+
+				jmp TIMER2_END
+
+TIMER2_END:
+
+	pop v
+	pop XL
+	pop XH
+	pop temp1
+	out SREG, temp1
+	pop temp3
+	pop temp2
+	pop temp1
+
 	reti
 
 ;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1793,5 +1951,14 @@ finished:
 	setVar magnetronRunning, v
 
 	call writeFinishedText
+
+	; set finish sound on
+	ldi v, 1
+	setVar playFinishSound, v
+
+	ldi v, 0
+	setVar finishSoundCounter, v
+	setVar nFinishSounds, v
+	setVar finishSoundIsOn, v
 
 	ret
