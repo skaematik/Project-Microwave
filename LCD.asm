@@ -795,8 +795,6 @@ convert_end:
 	; 		display entryStuff
 
 		handlePowerSelectionMode_keypad:
-			; ldi v, 0x02
-			; out PORTC, v
 
 			getVar currentInput, v
 
@@ -1503,7 +1501,6 @@ updateTime:
 ; on or off.
 updateMagnetron:
 	getVar magnetronRunning, v
-	out PORTC, v
 
 	getVar power, v
 
