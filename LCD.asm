@@ -790,7 +790,7 @@ convert_end:
 	; 		power = 50
 	; 	if 3
 	; 		power = 25
-	; 	if A
+	; 	if #
 	; 		mode = entry
 	; 		display entryStuff
 
@@ -1631,7 +1631,7 @@ TIMER2:
  ; 	play sound
  ; 		when 250ms is up
  ; 			keyPressed = 0
- 
+
 	TIMER2_continueHandling:
 		getVar keyPressed, v
 		cpi v, 1
