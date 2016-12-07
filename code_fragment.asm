@@ -106,7 +106,7 @@
 		lsl temp1 
 		add temp1, row 
 		add temp1, col ; temp1 = row*3 + col 
-		subi temp1, -1 ; Add the value of character ‘1’ 
+		subi temp1, -1 ; Add the value of character â€˜1â€™ 
 		
 		jmp keypadEnd
 
