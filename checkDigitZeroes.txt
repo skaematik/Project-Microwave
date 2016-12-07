@@ -1,9 +1,0 @@
-getVar a, temp1
-getVar b, temp2
-add temp1, temp2
-getVar c, temp2
-add temp1, temp2
-getVar d, temp2
-add temp1, temp2
-cpi temp1, 0
-breq blah

@@ -1,9 +1,9 @@
-; Group: E10
+﻿; Group: E10
 ; Annie Zhang / Stephen Chung
 ; z3459054 / z3463108
 
 .include "m2560def.inc" 
-; .def row = r16 ; current row number 
+
 .def v = r16
 .def temp1 = r17
 .def temp2 = r18
