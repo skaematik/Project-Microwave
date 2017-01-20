@@ -1,6 +1,4 @@
-﻿; Group: E10
-; Annie Zhang / Stephen Chung
-; z3459054 / z3463108
+; By Annie Zhang & Stephen Chung
 
 .include "m2560def.inc" 
 
